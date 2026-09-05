@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+draft_log.jsonl
+errors/
+samples/*.json
+!samples/.gitkeep
