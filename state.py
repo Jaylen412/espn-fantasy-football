@@ -284,7 +284,7 @@ class DraftState:
                     "is_me": p.team_id == self.cfg.my_team_id,
                     "keeper": p.keeper,
                 }
-                for p in sorted(self.picks.values(), key=lambda x: -x.overall)
+                for p in sorted(self.picks.values(), key=lambda x: x.overall)
             ],
             "my_roster": self.roster(self.cfg.my_team_id),
             "roster_slots": self.cfg.roster_slots,
