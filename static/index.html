@@ -146,7 +146,7 @@ function render(snap) {
     : np.picks_away === 0 ? "You are up now"
     : `Your next pick: #${np.overall}, ${np.picks_away} pick${np.picks_away === 1 ? "" : "s"} away`;
 
-  // Left pane — reverse-chronological feed, own picks visually distinct
+  // Left pane — chronological feed, own picks visually distinct
   $("pick-count").textContent = snap.picks.length ? `(${snap.picks.length})` : "";
   $("board").innerHTML = snap.picks.map(p => `
     <div class="flex items-baseline gap-2 px-2 py-1 rounded ${p.is_me ? "bg-emerald-900/50 ring-1 ring-emerald-600" : "odd:bg-slate-900/40"}">
