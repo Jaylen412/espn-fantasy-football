@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from analysis import analyze
 from config import load_config
 from poller import Broadcaster, Poller, make_source
 from state import DraftState
@@ -73,6 +74,35 @@ async def api_state() -> JSONResponse:
     snap = dict(poller.snapshot)
     snap["connection_healthy"] = poller.state.is_healthy()
     return JSONResponse(snap)
+
+
+@app.get("/analysis")
+async def analysis_page() -> FileResponse:
+    return FileResponse(STATIC / "analysis.html")
+
+
+@app.get("/api/analysis")
+async def api_analysis(team_id: int | None = None) -> JSONResponse:
+    """Pick grades, roster leverage and trade fits for one team.
+
+    On demand rather than in the snapshot: it re-derives the board as of every
+    pick, which is far too much work for a 4s poll loop, and §6 wants the SSE
+    payload small. Defaults to your team; any team id works, which is what makes
+    the trade section checkable against the other side.
+    """
+    if poller is None:
+        return JSONResponse({"error": "not started"}, status_code=503)
+    st = poller.state
+    try:
+        return JSONResponse(analyze(st, team_id))
+    except Exception as exc:
+        # Degrade to an explained empty report; a broken analysis must never take
+        # the draft board down with it (§1).
+        log.exception("analysis failed")
+        return JSONResponse({"error": f"{type(exc).__name__}: {exc}",
+                             "team_id": team_id if team_id is not None else st.cfg.my_team_id,
+                             "picks": [], "lineup": {}, "positional": [],
+                             "trade_targets": [], "leverage": [], "teams": []})
 
 
 @app.get("/api/health")
