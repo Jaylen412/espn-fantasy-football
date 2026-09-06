@@ -4,5 +4,6 @@ __pycache__/
 .env
 draft_log.jsonl
 errors/
-samples/*.json
+samples/**/*.json
+samples/**/.synthetic
 !samples/.gitkeep
