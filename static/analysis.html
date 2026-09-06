@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Report</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  /* Same base as the draft board, so the page stays legible if the CDN is gone. */
+  body { background:#0b0f14; color:#e6edf3; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin:0; }
+  .pane { background:#111820; border:1px solid #1f2a37; border-radius:12px; }
+  .scroll { overflow-y:auto; scrollbar-width:thin; scrollbar-color:#2d3b4d transparent; }
+  .scroll::-webkit-scrollbar { width:8px; }
+  .scroll::-webkit-scrollbar-thumb { background:#2d3b4d; border-radius:4px; }
+  .pos-QB{color:#f87171} .pos-RB{color:#4ade80} .pos-WR{color:#60a5fa}
+  .pos-TE{color:#fbbf24} .pos-K{color:#c084fc} .pos-DST{color:#94a3b8} .pos-\?{color:#64748b}
+  .grade { font-variant-numeric: tabular-nums; }
+  .bar { height:6px; border-radius:3px; background:#1f2a37; overflow:hidden; }
+  .bar > span { display:block; height:100%; }
+</style>
+</head>
+<body class="h-screen">
+
+<div id="banner" class="hidden px-4 py-3 text-sm font-semibold text-center"></div>
+
+<header class="flex items-center justify-between px-4 py-2 border-b border-slate-800">
+  <div class="flex items-baseline gap-3">
+    <h1 class="text-lg font-bold tracking-tight">Team report</h1>
+    <a href="/" class="text-sm text-slate-400 hover:text-slate-200">← draft board</a>
+  </div>
+  <div class="flex items-center gap-3 text-sm">
+    <select id="team-select" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"></select>
+    <span id="status-text" class="text-slate-500">loading…</span>
+    <button id="refresh" class="px-2 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800">refresh</button>
+  </div>
+</header>
+
+<main class="grid gap-3 p-3" style="grid-template-columns: 27rem 1fr 25rem; height: calc(100vh - 3.25rem);">
+
+  <!-- LEFT — pick by pick -->
+  <section class="pane flex flex-col min-h-0">
+    <div class="px-3 py-3 border-b border-slate-800 flex items-center gap-4">
+      <div id="draft-grade" class="grade text-5xl font-black leading-none">—</div>
+      <div class="min-w-0">
+        <div class="text-xs uppercase tracking-widest text-slate-400">Draft grade</div>
+        <div id="grade-summary" class="text-xs text-slate-400 mt-1 leading-snug">—</div>
+      </div>
+    </div>
+    <h2 class="px-3 py-2 text-xs uppercase tracking-widest text-slate-400">
+      Every pick <span id="pick-count" class="text-slate-600"></span>
+    </h2>
+    <div id="picks" class="scroll flex-1 px-2 pb-2 space-y-1 text-sm"></div>
+  </section>
+
+  <!-- CENTER — how to leverage this roster -->
+  <section class="flex flex-col gap-3 min-h-0">
+    <div class="pane p-3">
+      <div class="flex items-baseline gap-6">
+        <div>
+          <div class="text-xs uppercase tracking-widest text-slate-400">Best lineup projects</div>
+          <div id="proj-points" class="text-4xl font-black leading-tight">—</div>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-widest text-slate-400">In the league</div>
+          <div id="league-rank" class="text-4xl font-black leading-tight text-amber-300">—</div>
+        </div>
+        <div class="text-sm text-slate-400" id="league-avg"></div>
+      </div>
+    </div>
+
+    <div class="pane p-3 min-h-0 flex flex-col" style="max-height:40%">
+      <h2 class="text-xs uppercase tracking-widest text-slate-400 mb-2">How to leverage it</h2>
+      <ul id="leverage" class="scroll flex-1 space-y-2 text-sm text-slate-200"></ul>
+    </div>
+
+    <div class="pane p-3 min-h-0 flex flex-col flex-1">
+      <h2 class="text-xs uppercase tracking-widest text-slate-400 mb-2">
+        Starters by position <span class="text-slate-600 normal-case tracking-normal">vs league average</span>
+      </h2>
+      <div id="positional" class="scroll flex-1 space-y-2 text-sm"></div>
+      <h2 class="text-xs uppercase tracking-widest text-slate-400 mt-3 mb-1">Best lineup</h2>
+      <div id="lineup" class="scroll grid grid-cols-2 gap-x-4 gap-y-0.5 text-sm content-start" style="max-height:11rem"></div>
+    </div>
+  </section>
+
+  <!-- RIGHT — who to call -->
+  <section class="pane flex flex-col min-h-0">
+    <h2 class="px-3 py-2 text-xs uppercase tracking-widest text-slate-400 border-b border-slate-800">
+      Trade targets
+    </h2>
+    <div id="trades" class="scroll p-2 space-y-2 text-sm" style="max-height:62%"></div>
+    <div class="border-t border-slate-800 flex flex-col min-h-0 flex-1">
+      <h2 class="px-3 py-2 text-xs uppercase tracking-widest text-slate-400">
+        Your chips <span class="text-slate-600 normal-case tracking-normal">bench value above the wire</span>
+      </h2>
+      <div id="chips" class="scroll flex-1 px-2 pb-2 space-y-1 text-sm"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const posClass = (p) => `pos-${esc(p)}`;
+const num = (n) => (n == null ? "—" : Math.round(n).toLocaleString());
+
+let teamId = new URLSearchParams(location.search).get("team_id");
+let timer = null;
+
+// Grades are only useful at a glance, so colour carries the same information
+// as the letter — you should not have to read it to know how it went.
+function gradeColor(letter) {
+  if (!letter) return "text-slate-500";
+  if (letter.startsWith("A")) return "text-emerald-400";
+  if (letter.startsWith("B")) return "text-lime-400";
+  if (letter.startsWith("C")) return "text-amber-400";
+  if (letter.startsWith("D")) return "text-orange-400";
+  return "text-red-400";
+}
+
+const VERDICT = {
+  strength: ["text-emerald-400", "#34d399"],
+  weakness: ["text-red-400", "#f87171"],
+  unfilled: ["text-slate-500", "#475569"],
+  average:  ["text-slate-300", "#64748b"],
+};
+
+function render(rep) {
+  $("banner").className = rep.error ? "px-4 py-3 text-sm font-semibold text-center bg-amber-700 text-white" : "hidden";
+  if (rep.error) $("banner").textContent = rep.error;
+
+  const grade = rep.draft_grade || {};
+  $("draft-grade").textContent = grade.letter || "—";
+  $("draft-grade").className = `grade text-5xl font-black leading-none ${gradeColor(grade.letter)}`;
+  $("grade-summary").textContent = grade.summary || "";
+  $("pick-count").textContent = rep.picks_made ? `(${rep.picks_made})` : "";
+  $("proj-points").textContent = num(rep.projected_points);
+  $("league-rank").textContent = rep.league_size ? `${rep.league_rank} / ${rep.league_size}` : "—";
+  $("league-avg").textContent = rep.league_avg_points
+    ? `league average ${num(rep.league_avg_points)} pts` : "";
+
+  // Pick by pick — the grade, then the sentence that justifies it.
+  $("picks").innerHTML = (rep.picks || []).map(p => {
+    const passed = p.passed_on && p.passed_on.still_there_next_turn === true
+      ? `<div class="text-emerald-500/80 text-xs mt-0.5">${esc(p.passed_on.name)} was still there at your next pick — no harm done</div>` : "";
+    const delta = p.value_delta == null ? "" :
+      `<span class="tabular-nums ${p.value_delta > 0 ? "text-emerald-500" : p.value_delta < 0 ? "text-orange-500" : "text-slate-600"}">${p.value_delta > 0 ? "+" : ""}${p.value_delta}</span>`;
+    return `
+    <div class="p-2 rounded bg-slate-900/50 border border-slate-800">
+      <div class="flex items-baseline gap-2">
+        <span class="text-slate-600 tabular-nums w-11 shrink-0">${p.round}.${String(p.overall).padStart(2,"0")}</span>
+        <span class="font-semibold truncate">${esc(p.name)}</span>
+        <span class="${posClass(p.position)} font-bold shrink-0">${esc(p.position)}</span>
+        <span class="ml-auto text-xs text-slate-600 tabular-nums">#${p.espn_rank} ${delta}</span>
+        <span class="grade font-black w-8 text-right ${gradeColor(p.grade)}">${esc(p.grade || "—")}</span>
+      </div>
+      <div class="text-slate-400 text-xs mt-1">${esc(p.reason)}</div>
+      ${passed}
+    </div>`;
+  }).join("") || `<div class="text-slate-600 p-2">No picks to grade yet.</div>`;
+
+  $("leverage").innerHTML = (rep.leverage || []).map(n =>
+    `<li class="flex gap-2"><span class="text-slate-600">›</span><span>${esc(n)}</span></li>`).join("")
+    || `<li class="text-slate-600">Nothing to say yet — draft some players.</li>`;
+
+  // Positional strength: the bar is my starters against the league average at
+  // that position, which is the only comparison that decides matchups.
+  $("positional").innerHTML = (rep.positional || []).map(r => {
+    const [text, fill] = VERDICT[r.verdict] || VERDICT.average;
+    const scale = Math.max(r.my_points, r.league_avg, 1);
+    return `
+    <div>
+      <div class="flex items-baseline gap-2">
+        <span class="${posClass(r.position)} font-bold w-9">${esc(r.position)}</span>
+        <span class="tabular-nums">${num(r.my_points)}</span>
+        <span class="text-slate-600 text-xs tabular-nums">avg ${num(r.league_avg)}</span>
+        <span class="ml-auto tabular-nums ${text}">${r.delta > 0 ? "+" : ""}${num(r.delta)}</span>
+        <span class="text-slate-600 text-xs w-10 text-right">${r.rank ? "#" + r.rank : ""}</span>
+      </div>
+      <div class="bar mt-1"><span style="width:${(100 * r.my_points / scale).toFixed(1)}%;background:${fill}"></span></div>
+      <div class="bar mt-0.5" style="opacity:.45"><span style="width:${(100 * r.league_avg / scale).toFixed(1)}%;background:#64748b"></span></div>
+    </div>`;
+  }).join("");
+
+  $("lineup").innerHTML = Object.entries(rep.lineup || {}).map(([slot, players]) => `
+    <div class="col-span-2 grid grid-cols-[3.5rem_1fr] gap-2 items-start">
+      <span class="text-slate-500 text-xs pt-0.5">${esc(slot)}</span>
+      <div>${players.map(p =>
+        `<div class="truncate">${esc(p.name)}
+           <span class="${posClass(p.position)} text-xs">${esc(p.position)}</span>
+           <span class="text-slate-600 text-xs tabular-nums">${p.projected_points}</span></div>`).join("")
+        || `<div class="text-slate-700">—</div>`}</div>
+    </div>`).join("");
+
+  $("trades").innerHTML = (rep.trade_targets || []).map(t => `
+    <div class="p-2 rounded bg-slate-900/60 border border-slate-800">
+      <div class="flex items-baseline gap-2">
+        <span class="font-bold truncate">${esc(t.team_name)}</span>
+        <span class="ml-auto text-xs text-slate-500">fit</span>
+        <span class="tabular-nums text-emerald-400 font-bold">${t.fit_score}</span>
+      </div>
+      <div class="mt-2 grid grid-cols-[2.4rem_1fr] gap-x-2 gap-y-1 text-xs items-baseline">
+        <span class="text-red-400 uppercase tracking-wider">give</span>
+        <span class="truncate">${esc(t.give.name)}
+          <span class="${posClass(t.give.position)}">${esc(t.give.position)}</span>
+          <span class="text-slate-600 tabular-nums">${t.give.projected_points}</span></span>
+        <span class="text-emerald-400 uppercase tracking-wider">get</span>
+        <span class="truncate">${esc(t.get.name)}
+          <span class="${posClass(t.get.position)}">${esc(t.get.position)}</span>
+          <span class="text-slate-600 tabular-nums">${t.get.projected_points}</span></span>
+      </div>
+      <div class="text-slate-400 text-xs mt-2">${esc(t.rationale)}</div>
+      <div class="text-slate-500 text-xs mt-1 italic">${esc(t.balance)}</div>
+    </div>`).join("")
+    || `<div class="text-slate-600 p-2">No mutual fits yet — a trade needs surplus on both sides, which usually means waiting until the draft is done.</div>`;
+
+  $("chips").innerHTML = (rep.trade_chips || []).map(c => `
+    <div class="flex items-baseline gap-2 px-1">
+      <span class="truncate">${esc(c.name)}</span>
+      <span class="${posClass(c.position)} text-xs font-bold">${esc(c.position)}</span>
+      <span class="ml-auto text-slate-400 tabular-nums text-xs">${c.projected_points}</span>
+      <span class="text-emerald-500 tabular-nums text-xs w-12 text-right">+${num(c.surplus)}</span>
+    </div>`).join("") || `<div class="text-slate-600 px-2">No surplus on your bench.</div>`;
+
+  // Team switcher — reading another team's report is how you check the other
+  // side of a trade before you send it.
+  const teams = rep.teams || [];
+  if (teams.length && $("team-select").options.length !== teams.length) {
+    $("team-select").innerHTML = teams.map(t =>
+      `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  }
+  if (rep.team_id != null) $("team-select").value = rep.team_id;
+  document.title = `${rep.team_name || "Team"} report`;
+
+  $("status-text").textContent = `${new Date().toLocaleTimeString()} · ${esc((rep.draft_status || "").replace("_", " ").toLowerCase())}`;
+
+  // Grades move with every pick while the draft runs; once it is done they stop.
+  clearInterval(timer);
+  if (rep.draft_status !== "COMPLETE") timer = setInterval(load, 20000);
+}
+
+async function load() {
+  try {
+    const url = "/api/analysis" + (teamId ? `?team_id=${encodeURIComponent(teamId)}` : "");
+    const r = await fetch(url);
+    const body = await r.json();
+    if (!r.ok) {
+      $("banner").className = "px-4 py-3 text-sm font-semibold text-center bg-red-700 text-white";
+      $("banner").textContent = body.error || `Server returned ${r.status}`;
+      return;
+    }
+    render(body);
+  } catch (e) {
+    $("banner").className = "px-4 py-3 text-sm font-semibold text-center bg-red-700 text-white";
+    $("banner").textContent = "Cannot reach the dashboard server.";
+  }
+}
+
+$("refresh").onclick = load;
+$("team-select").onchange = (e) => {
+  teamId = e.target.value;
+  history.replaceState(null, "", `?team_id=${teamId}`);
+  load();
+};
+
+load();
+</script>
+</body>
+</html>

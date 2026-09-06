@@ -25,9 +25,31 @@ inferred from an undocumented API and must be confirmed against a live response 
 
 ## Current state
 
-Built and passing 46 tests against synthetic fixtures. **Never run against a live ESPN league** — every `[VERIFY]`
+Built, plus the team report (below). 69 tests pass. **Never run against a live ESPN league** — every `[VERIFY]`
 item in §5.3/§5.4/§5.5 is still unconfirmed, and the parsers were written from the spec, which §5.3 explicitly warns
-against. `scripts/dump_samples.py` exists to close that gap; run it before trusting anything. Not a git repository yet.
+against. `scripts/dump_samples.py` exists to close that gap; run it before trusting anything.
+
+### Two fixture directories, and why
+
+| Directory | Holds | Written by |
+|---|---|---|
+| `samples/` | Synthetic 12-team draft: 322 players, 192 frames, one per pick, ending at `COMPLETE` | `make_fixtures.py` |
+| `samples/live/` | The real dump: 400 real players, and a `draft_detail_0001.json` whose `playerId` is `-1` everywhere — the REST replica lag from the live draft | `dump_samples.py`, `probe_draft.py --record` |
+
+They are separate so neither generator can overwrite the other's files. All of `samples/**` is gitignored, so a real
+dump is the **only copy** — `make_fixtures.py` refuses to write into a directory holding JSON it did not generate
+(it leaves a `.synthetic` marker; `--force` overrides). Do not remove that guard: an earlier version deleted
+`draft_detail_*.json` on sight and would have destroyed the dump.
+
+`tests/fixtures.py` is a third path, for tests that want a *finished* draft with deliberate imbalances (a team that
+hoards RBs, one that punts TE): it builds the league in memory, with no files at all.
+
+### draft_log.jsonl is live data
+
+`state.DRAFT_LOG` is a relative path, so anything ingesting picks from the repo root appends to the user's real draft
+record, which is gitignored and unrecoverable. `tests/conftest.py` redirects it to a tmp dir for the whole session —
+keep that fixture. If a dashboard is running with `--reload`, note that every `.py` edit restarts it and re-logs the
+entire draft, so the file legitimately contains repeated passes over the same picks.
 
 ## What this is
 
@@ -47,15 +69,17 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt pytest pytest-asyncio
 cp .env.example .env                                    # then fill in league ID + cookies (§4)
 
-python scripts/dump_samples.py                          # build step 1: confirm [VERIFY] items (§13)
+python scripts/dump_samples.py                          # build step 1: confirm [VERIFY] items (§13) → samples/live/
 python scripts/whoami.py                                # prints team IDs → paste yours into MY_TEAM_ID
-python scripts/probe_draft.py --record samples/         # 1s poll; measures REST lag (§5.5)
-python scripts/make_fixtures.py                         # synthetic fixtures, no credentials needed
+python scripts/probe_draft.py --record samples/live/    # 1s poll; measures REST lag (§5.5)
+python scripts/make_fixtures.py                         # synthetic fixtures → samples/, no credentials needed
+python scripts/make_fixtures.py --frames 40 --out /tmp/x  # partial draft, somewhere else
 
 uvicorn app:app --host 127.0.0.1 --port 8000 --reload   # live
-python app.py --replay samples/                         # offline replay (§11.2)
+python app.py --replay samples/                         # offline replay, runs to COMPLETE (§11.2)
 
-pytest                                                  # 46 tests
+pytest                                                  # 69 tests
+pytest tests/test_analysis.py                           # team report — in-memory fixtures, no files needed
 pytest tests/test_draft_math.py::test_snake_reverses_every_other_round
 ```
 
@@ -65,14 +89,16 @@ through `python app.py --replay DIR` or the `REPLAY_DIR` env var.
 ## Architecture (§6)
 
 ```
-config.py          .env loading, position/slot maps, roster shape
-espn_client.py     HTTP wrapper — cookies, browser UA, retries, timeouts
-poller.py          asyncio task: polls mDraftDetail, diffs picks, emits events
-state.py           In-memory DraftState — single source of truth
-recommender.py     Scores available players for the user's next pick
-app.py             FastAPI: serves static/, /api/state, /api/health, /events (SSE)
-static/index.html  Vanilla JS + Tailwind CDN dashboard
-scripts/           dump_samples, whoami, probe_draft, make_fixtures
+config.py             .env loading, position/slot maps, roster shape
+espn_client.py        HTTP wrapper — cookies, browser UA, retries, timeouts
+poller.py             asyncio task: polls mDraftDetail, diffs picks, emits events
+state.py              In-memory DraftState — single source of truth
+recommender.py        Scores available players for the user's next pick
+analysis.py           Grades picks already made, rates the roster, finds trade fits
+app.py                FastAPI: serves static/, /api/state, /api/health, /events (SSE), /api/analysis
+static/index.html     Vanilla JS + Tailwind CDN dashboard
+static/analysis.html  Team report page — grades, leverage, trade targets
+scripts/              dump_samples, whoami, probe_draft, make_fixtures (all take --out)
 ```
 
 `poller.py` abstracts its data behind a `Source` protocol — `LiveSource` (ESPN) or `ReplaySource` (fixtures from
@@ -127,6 +153,30 @@ the top of `recommender.py` so they can be tuned mid-draft. VOR is the backbone 
 comparable. Subtracting survival probability is the point of the tool: take the player who won't come back to you, not
 the highest-ranked one. Every recommendation carries a one-line human-readable `reason`; a bare number is useless with
 45 seconds on the clock.
+
+## Team report (`analysis.py`, not in the spec)
+
+`/analysis` answers the questions the draft board cannot: how did the picks I already made turn out, what is this
+roster actually good at, and who should I call about a trade. Reachable from the board header; `/api/analysis`
+serves it, `?team_id=` reads any team so you can check the other side of a trade before you send it.
+
+- **Off the poll loop, on purpose.** Grading a pick rewinds the board to how it stood at that moment
+  (`board_before`), which is far too much work to redo every four seconds, and §6 wants the SSE snapshot small. It is
+  computed on demand and never touches `poller.py`.
+- **Same vocabulary as §7.** Projected points, replacement level, VOR, roster need — a grade here is commensurate
+  with a recommendation there. Weights live in `GRADE_WEIGHTS` at the top of the module, like `recommender.WEIGHTS`.
+- **`value_delta = overall - rank`.** Positive means he fell past his rank and you got value; negative is a reach.
+  The sign is easy to invert and a test pins it (`test_the_same_player_grades_better_the_later_he_is_taken`).
+- **K and DST are graded within their own position.** Every roster must carry one and their ESPN ranks sit hundreds
+  of picks below where anyone takes them, so against the whole board every kicker in the league grades F — a property
+  of the format, not of the pick. What is graded instead: was he the best one left, and was a real starting slot still
+  empty when you took him.
+- **Trade fits are scored as a geometric mean** of what each side gains, so a one-sided fit scores near zero rather
+  than merely low. Surplus is measured against `waiver_baseline` — the best player still on the board at that
+  position, falling back to the worst rostered one when the position is picked clean, since a zero baseline would
+  price every bench player as pure surplus.
+- **Degrades, never raises.** An empty draft, an unknown team, or an unmapped `playerId` produce an explained empty
+  report or an ungraded row (§1, §9). The endpoint catches everything; a broken report must not take the board down.
 
 ## Build order (§13)
 
