@@ -52,6 +52,9 @@ class Config:
     poll_interval: float = 4.0
     log_level: str = "INFO"
     replay_dir: str | None = None
+    playoff_teams: int = 0          # 0 = read from ESPN's scheduleSettings
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o"
 
     @property
     def rank_type(self) -> str:
@@ -90,4 +93,7 @@ def load_config() -> Config:
         poll_interval=float(os.getenv("POLL_INTERVAL_SECONDS", "4")),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         replay_dir=replay,
+        playoff_teams=int(os.getenv("PLAYOFF_TEAMS", "").strip() or 0),
+        openai_api_key=(os.getenv("OPEN_AI_KEY") or os.getenv("OPENAI_API_KEY") or "").strip(),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-4o").strip() or "gpt-4o",
     )

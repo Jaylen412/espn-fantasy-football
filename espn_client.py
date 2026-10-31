@@ -141,6 +141,40 @@ class ESPNClient:
             tag="player_pool",
         )
 
+    # ---- in-season views (trade analysis; all [VERIFY] until dumped) -----------
+
+    async def rosters(self) -> dict[str, Any]:
+        """Every team's current roster with lineup slot and injury status."""
+        return await self._get(["mRoster", "mTeam"], tag="rosters")
+
+    async def matchups(self) -> dict[str, Any]:
+        """Weekly matchup results — `schedule[]` with per-side points by period."""
+        return await self._get(["mMatchupScore", "mScoreboard", "mSettings"], tag="matchups")
+
+    async def standings(self) -> dict[str, Any]:
+        return await self._get(["mStandings"], tag="standings")
+
+    async def player_weeks(self, player_ids: list[int], through_period: int) -> dict[str, Any]:
+        """Weekly actuals for specific players: one `stats` entry per scoring period.
+
+        statSourceId 0 = actual, 1 = projected; the header filter asks ESPN to
+        include every period up to `through_period` for both.
+        """
+        fantasy_filter = {
+            "players": {
+                "filterIds": {"value": player_ids},
+                "filterStatsForTopScoringPeriodIds": {
+                    "value": through_period,
+                    "additionalValue": ["00", "10"],
+                },
+            }
+        }
+        return await self._get(
+            ["kona_playercard"],
+            extra_headers={"X-Fantasy-Filter": json.dumps(fantasy_filter)},
+            tag="player_weeks",
+        )
+
 
 async def with_backoff(fn, *, attempts: int = 3, base: float = 1.0, cap: float = 30.0):
     """Retry a coroutine factory with exponential backoff, capped at 30s (§9).

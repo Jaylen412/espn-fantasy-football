@@ -25,7 +25,7 @@ inferred from an undocumented API and must be confirmed against a live response 
 
 ## Current state
 
-Built, plus the team report (below). 69 tests pass. **Never run against a live ESPN league** — every `[VERIFY]`
+Built, plus the team report and the trade lab (both below). 120 tests pass. **Never run against a live ESPN league** — every `[VERIFY]`
 item in §5.3/§5.4/§5.5 is still unconfirmed, and the parsers were written from the spec, which §5.3 explicitly warns
 against. `scripts/dump_samples.py` exists to close that gap; run it before trusting anything.
 
@@ -78,7 +78,8 @@ python scripts/make_fixtures.py --frames 40 --out /tmp/x  # partial draft, somew
 uvicorn app:app --host 127.0.0.1 --port 8000 --reload   # live
 python app.py --replay samples/                         # offline replay, runs to COMPLETE (§11.2)
 
-pytest                                                  # 69 tests
+python scripts/dump_season.py                           # in-season views → samples/live/season_*.json
+pytest                                                  # 120 tests
 pytest tests/test_analysis.py                           # team report — in-memory fixtures, no files needed
 pytest tests/test_draft_math.py::test_snake_reverses_every_other_round
 ```
@@ -95,9 +96,14 @@ poller.py             asyncio task: polls mDraftDetail, diffs picks, emits event
 state.py              In-memory DraftState — single source of truth
 recommender.py        Scores available players for the user's next pick
 analysis.py           Grades picks already made, rates the roster, finds trade fits
+season.py             In-season rosters, weekly actuals, standings (SeasonState + SeasonLoader)
+trade.py              evaluate_trade: before/after lineups for both sides of a hypothetical trade
+outlook.py            Season outlook: your regular season with simulated trades vs. keeping the roster
+advisor.py            OpenAI verdicts on a trade and on a season outlook (REST via httpx, never raises)
 app.py                FastAPI: serves static/, /api/state, /api/health, /events (SSE), /api/analysis
 static/index.html     Vanilla JS + Tailwind CDN dashboard
 static/analysis.html  Team report page — grades, leverage, trade targets
+static/trades.html    Trade lab — pick players on both sides, see lineup impact, ask the AI
 scripts/              dump_samples, whoami, probe_draft, make_fixtures (all take --out)
 ```
 
@@ -177,6 +183,38 @@ serves it, `?team_id=` reads any team so you can check the other side of a trade
   price every bench player as pure surplus.
 - **Degrades, never raises.** An empty draft, an unknown team, or an unmapped `playerId` produce an explained empty
   report or an ungraded row (§1, §9). The endpoint catches everything; a broken report must not take the board down.
+
+## Trade lab (`season.py`, `trade.py`, `advisor.py`, `/trades`)
+
+Beyond the draft spec: in-season trade evaluation on live ESPN data. Read-only; nothing is sent to ESPN.
+
+- **Separate from `DraftState`.** `SeasonState` is re-read from ESPN (`mRoster`, `mMatchupScore`,
+  `kona_playercard`), cached 60s. Draft rosters go stale after the first trade or waiver claim.
+  Disabled in replay mode (`season_loader` is `None`; routes return an explained 503).
+- **Shapes confirmed against a live dump** (`scripts/dump_season.py`): weekly stats are `statSplitTypeId == 1`;
+  `statSourceId` 0 = actual, 1 = projected. A bye week has *no row*; future weeks read an actual of `0.0`;
+  the current week has only a projection. Only periods `< current` count as played.
+- **Judged by the starting lineup.** `evaluate_trade` reuses `analysis.optimal_lineup`, so bench-for-bench
+  swaps are worth zero. A player's weekly value blends season avg / last-3 avg / this week's projection
+  (`VALUE_WEIGHTS`); OUT and IR players are worth 0.
+- **The model does no arithmetic.** `advisor.py` sends only the computed deltas and per-player stats, and
+  returns `{available: False, error}` on any failure, so a dead key never hides the numbers. The key is
+  `OPEN_AI_KEY` in `.env` (also reads `OPENAI_API_KEY`); `OPENAI_MODEL` overrides the default.
+- **Simulation mode** (toggle in the page header, default off). The browser holds a *ledger* of applied trades
+  in `localStorage`; the server is stateless and replays it onto a copy of `SeasonState` per request
+  (`trade.replay`). Undo is a shorter ledger. A ledger the real league has outgrown raises `TradeError`
+  ("out of date at trade N") rather than showing wrong numbers.
+- **Season outlook** (`outlook.py`, `POST /api/trades/outlook[/summary]`). Regular season only. Weekly expected
+  points = best lineup (`trade.lineup_strength`); spread = the team's real week-to-week scores shrunk toward the
+  league's; expected wins are exact (normal CDF), playoff/seed odds are a seeded Monte Carlo. Both scenarios
+  share the same random draws, so the difference is the trades, not noise (a no-trade ledger gives exactly 0).
+  Playoff spots and regular-season length come from ESPN's `scheduleSettings`; `PLAYOFF_TEAMS` overrides. Lineups
+  are assumed optimal every week (no byes/injuries), so trust the *change*, not absolute points.
+  It runs in `asyncio.to_thread` so it cannot stall the poller.
+- **Page vs server drift.** `static/*.html` is read from disk per request but routes live in the running
+  process: after changing `app.py`, restart uvicorn or the new page talks to an old backend (it now says so).
+- **Do not boot the full app to test it** against a real league: the lifespan starts the draft poller and
+  appends to `draft_log.jsonl`. Use `TestClient(app)` *without* a `with` block and set `app.season_loader`.
 
 ## Build order (§13)
 

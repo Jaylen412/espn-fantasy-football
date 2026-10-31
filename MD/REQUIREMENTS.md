@@ -23,6 +23,8 @@ This document is the build spec. Anything marked **[VERIFY]** is based on ESPN's
 
 ---
 
+> **Scope extension (post-draft):** the trade lab (`/trades`) evaluates hypothetical trades on live in-season data and asks OpenAI for a verdict. It is read-only against ESPN like everything else, and is not covered by the draft-day sections of this spec.
+
 ## 2. Tech stack
 
 | Layer | Choice | Notes |

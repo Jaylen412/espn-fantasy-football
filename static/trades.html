@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade Lab</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  /* Same base as the draft board and team report, so the page stays legible if the CDN is gone. */
+  body { background:#0b0f14; color:#e6edf3; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin:0; }
+  .pane { background:#111820; border:1px solid #1f2a37; border-radius:12px; }
+  .scroll { overflow-y:auto; scrollbar-width:thin; scrollbar-color:#2d3b4d transparent; }
+  .scroll::-webkit-scrollbar { width:8px; }
+  .scroll::-webkit-scrollbar-thumb { background:#2d3b4d; border-radius:4px; }
+  .pos-QB{color:#f87171} .pos-RB{color:#4ade80} .pos-WR{color:#60a5fa}
+  .pos-TE{color:#fbbf24} .pos-K{color:#c084fc} .pos-DST{color:#94a3b8} .pos-\?{color:#64748b}
+  .num { font-variant-numeric: tabular-nums; }
+  .row { display:grid; grid-template-columns: 2rem 1fr 3rem 3rem 2.5rem; gap:.5rem; align-items:center;
+         padding:.35rem .5rem; border-radius:8px; cursor:pointer; border:1px solid transparent; }
+  .row:hover { background:#17212d; }
+  .row.picked-give { background:#2a1717; border-color:#7f1d1d; }
+  .row.picked-get  { background:#12261b; border-color:#166534; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+</style>
+</head>
+<body class="h-screen">
+
+<div id="banner" class="hidden px-4 py-3 text-sm font-semibold text-center"></div>
+
+<header class="flex items-center justify-between px-4 py-2 border-b border-slate-800">
+  <div class="flex items-baseline gap-3">
+    <h1 class="text-lg font-bold tracking-tight">Trade lab</h1>
+    <a href="/" class="text-sm text-slate-400 hover:text-slate-200">← draft board</a>
+    <a href="/analysis" class="text-sm text-slate-400 hover:text-slate-200">team report</a>
+  </div>
+  <div class="flex items-center gap-3 text-sm">
+    <label class="flex items-center gap-2 cursor-pointer select-none" title="Chain hypothetical trades on a simulated copy of the league">
+      <input id="sim-toggle" type="checkbox" class="accent-indigo-500">
+      <span id="sim-label" class="text-slate-300">Simulate trades</span>
+    </label>
+    <span id="status-text" class="text-slate-500">loading…</span>
+    <button id="refresh" class="px-2 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800">refresh</button>
+  </div>
+</header>
+
+<main class="grid gap-3 p-3" style="grid-template-columns: 24rem 1fr 24rem; height: calc(100vh - 3.25rem);">
+
+  <!-- LEFT — your roster: click to send -->
+  <section class="pane flex flex-col min-h-0">
+    <div class="px-3 py-2 border-b border-slate-800">
+      <select id="team-a" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"></select>
+      <div class="text-xs text-slate-500 mt-1">Click a player to <span class="text-red-300">send</span> him</div>
+    </div>
+    <div class="row text-xs uppercase tracking-widest text-slate-500" style="cursor:default">
+      <span></span><span>Player</span><span class="text-right">Avg</span><span class="text-right">L3</span><span class="text-right">Val</span>
+    </div>
+    <div id="roster-a" class="scroll flex-1 px-1 pb-2"></div>
+  </section>
+
+  <!-- CENTER — the trade and what it does -->
+  <section class="scroll flex flex-col gap-3 min-h-0 pr-1">
+    <div class="pane p-3 shrink-0">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <div class="text-xs uppercase tracking-widest text-red-300 mb-1">You send</div>
+          <div id="slip-give" class="text-sm space-y-1 min-h-[2.5rem]"></div>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-widest text-emerald-300 mb-1">You get</div>
+          <div id="slip-get" class="text-sm space-y-1 min-h-[2.5rem]"></div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 mt-3">
+        <button id="advise" class="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold" disabled>Ask AI</button>
+        <button id="apply" class="hidden px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-sm font-semibold" disabled>Apply trade</button>
+        <button id="clear" class="px-3 py-1.5 rounded border border-slate-700 text-sm text-slate-300 hover:bg-slate-800">Clear</button>
+        <span id="accept" class="ml-auto text-sm text-slate-400"></span>
+      </div>
+    </div>
+
+    <div id="result" class="grid grid-cols-2 gap-3 shrink-0"></div>
+
+    <div id="ledger-pane" class="hidden pane p-3 shrink-0">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs uppercase tracking-widest text-slate-400">Simulated trades <span id="ledger-count" class="text-slate-600"></span></h2>
+        <div class="flex gap-2">
+          <button id="undo" class="px-2 py-0.5 rounded border border-slate-700 text-xs text-slate-300 hover:bg-slate-800">Undo last</button>
+          <button id="reset-sim" class="px-2 py-0.5 rounded border border-slate-700 text-xs text-slate-300 hover:bg-slate-800">Reset to real</button>
+        </div>
+      </div>
+      <ol id="ledger" class="text-xs text-slate-300 space-y-1 list-decimal ml-5 max-h-24 scroll"></ol>
+    </div>
+
+
+    <div id="outlook-pane" class="hidden pane p-3 shrink-0">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs uppercase tracking-widest text-slate-400">Season outlook</h2>
+        <button id="outlook-ai-btn" class="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold whitespace-nowrap" disabled>Summarize outlook</button>
+      </div>
+      <div id="outlook-meta" class="text-xs text-slate-500 mb-2 -mt-1"></div>
+      <div id="outlook-body" class="text-sm text-slate-500">Apply a simulated trade to compare your season with keeping your team as is.</div>
+      <div id="outlook-ai" class="mt-3 text-sm text-slate-300 space-y-2"></div>
+    </div>
+
+    <div class="pane p-3 flex flex-col shrink-0">
+      <h2 class="text-xs uppercase tracking-widest text-slate-400 mb-2">AI recommendation <span class="text-slate-600 normal-case tracking-normal">this trade</span></h2>
+      <div id="ai" class="scroll text-sm text-slate-300 space-y-2" style="max-height:16rem; min-height:4rem">
+        <p class="text-slate-500">Build a trade, then press Ask AI. The model only sees the numbers above.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT — their roster: click to receive -->
+  <section class="pane flex flex-col min-h-0">
+    <div class="px-3 py-2 border-b border-slate-800">
+      <select id="team-b" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"></select>
+      <div class="text-xs text-slate-500 mt-1">Click a player to <span class="text-emerald-300">receive</span> him</div>
+    </div>
+    <div class="row text-xs uppercase tracking-widest text-slate-500" style="cursor:default">
+      <span></span><span>Player</span><span class="text-right">Avg</span><span class="text-right">L3</span><span class="text-right">Val</span>
+    </div>
+    <div id="roster-b" class="scroll flex-1 px-1 pb-2"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (n, d = 1) => (n == null ? "—" : Number(n).toFixed(d));
+const signed = (n) => (n > 0 ? "+" : "") + fmt(n);
+const deltaClass = (n) => (n > 0.05 ? "text-emerald-400" : n < -0.05 ? "text-red-400" : "text-slate-400");
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window: page works without it */ } },
+};
+// sim: chain trades on a simulated league. Off = standard analysis against the real one.
+// The ledger is kept while sim is off so switching back on resumes where you left off.
+const state = { season: null, a: null, b: null, give: new Set(), get: new Set(), ai: false, last: null,
+                sim: store.get("trades.sim", false), ledger: store.get("trades.ledger", []), realOwner: {} };
+const simActive = () => state.sim;
+const activeLedger = () => (state.sim ? state.ledger : []);
+const saveSim = () => { store.set("trades.sim", state.sim); store.set("trades.ledger", state.ledger); };
+let evalSeq = 0;
+
+function setBanner(msg) {
+  $("banner").className = msg ? "px-4 py-3 text-sm font-semibold text-center bg-amber-700 text-white" : "hidden";
+  $("banner").textContent = msg || "";
+}
+
+const team = (id) => state.season.teams.find(t => t.id === id);
+const player = (id) => [...team(state.a).roster, ...team(state.b).roster].find(p => p.id === id);
+
+async function loadSeason(refresh = false) {
+  $("status-text").textContent = "loading…";
+  try {
+    const res = await fetch("/api/season" + (refresh ? "?refresh=true" : ""));
+    const data = await res.json();
+    if (!res.ok) { setBanner(data.error || "season data unavailable"); $("status-text").textContent = "unavailable"; return; }
+    state.realOwner = {};
+    data.teams.forEach(t => t.roster.forEach(p => { state.realOwner[p.id] = t.id; }));
+    state.season = data;
+    setBanner(data.stale_error ? `Showing last good data — refresh failed: ${data.stale_error}` : "");
+    await overlaySimulation();
+    if (state.a == null) {
+      state.a = data.my_team_id in Object.fromEntries(data.teams.map(t => [t.id, 1])) ? data.my_team_id : data.teams[0].id;
+      state.b = (data.teams.find(t => t.id !== state.a) || data.teams[0]).id;
+    }
+    $("status-text").textContent = `week ${data.period} · ${data.final_period - data.period + 1} left`;
+    renderTeams();
+    renderRosters();
+    renderSlip();
+    renderMode();
+    evaluate();
+    loadOutlook();
+  } catch (e) {
+    setBanner("Could not reach the server: " + e.message);
+    $("status-text").textContent = "offline";
+  }
+}
+
+// Swap in the simulated rosters when sim is on. A ledger the real league has outgrown
+// (a player was really traded or dropped) is reported, never silently applied.
+async function overlaySimulation() {
+  if (!state.sim || !state.ledger.length) return;
+  const res = await fetch("/api/season/simulated", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ledger: state.ledger }),
+  });
+  const sim = await res.json().catch(() => ({}));
+  if (res.status === 404) {
+    // The page is served from disk but the routes live in the running process: a server
+    // started before simulation existed has the buttons' page and none of their endpoints.
+    setBanner("Simulation needs a newer server than the one running. Restart uvicorn, then reload this page.");
+    state.stale = true;
+    return;
+  }
+  if (!res.ok) {
+    setBanner(`${sim.error || "Simulation failed (HTTP " + res.status + ")"}. Showing real rosters — press "Reset to real" to clear the simulation.`);
+    state.stale = true;
+    return;
+  }
+  state.stale = false;
+  state.season = { ...state.season, teams: state.season.teams.map(t => ({
+    ...t, roster: (sim.teams.find(x => x.id === t.id) || t).roster })) };
+}
+
+function renderMode() {
+  $("sim-toggle").checked = state.sim;
+  $("sim-label").className = state.sim ? "text-indigo-300 font-semibold" : "text-slate-300";
+  $("apply").classList.toggle("hidden", !state.sim);
+  $("ledger-pane").classList.toggle("hidden", !state.sim);
+  $("outlook-pane").classList.toggle("hidden", !state.sim);
+  $("ledger-count").textContent = state.ledger.length ? `(${state.ledger.length})` : "";
+  const names = (ids) => ids.map(i => (allPlayer(i) || { name: "player " + i }).name).join(", ");
+  $("ledger").innerHTML = state.ledger.length
+    ? state.ledger.map(t => `<li>${esc(teamName(t.team_a))} sent ${esc(names(t.give))} to ${esc(teamName(t.team_b))} for ${esc(names(t.get))}</li>`).join("")
+    : '<li class="list-none ml-[-1.25rem] text-slate-600">No simulated trades yet. Build a trade and press Apply.</li>';
+  $("undo").disabled = $("reset-sim").disabled = !state.ledger.length;
+}
+const teamName = (id) => (team(id) || { name: "team " + id }).name;
+const allPlayer = (id) => state.season.teams.flatMap(t => t.roster).find(p => p.id === id);
+
+function renderTeams() {
+  const opts = (sel) => state.season.teams.map(t =>
+    `<option value="${t.id}" ${t.id === sel ? "selected" : ""}>${esc(t.name)} (${esc(t.record)})</option>`).join("");
+  $("team-a").innerHTML = opts(state.a);
+  $("team-b").innerHTML = opts(state.b);
+}
+
+function rowHtml(p, picked, kind) {
+  const inj = !["ACTIVE", "NORMAL"].includes(p.injury)
+    ? ` <span class="text-xs text-red-400">${esc(p.injury === "INJURY_RESERVE" ? "IR" : p.injury.slice(0, 4))}</span>` : "";
+  const moved = state.sim && state.ledger.length && state.realOwner[p.id] !== undefined
+    && state.realOwner[p.id] !== (p._owner ?? state.realOwner[p.id])
+    ? ' <span class="text-xs text-indigo-300" title="acquired in a simulated trade">↔</span>' : "";
+  const arrow = p.trend === "up" ? "▲" : p.trend === "down" ? "▼" : "";
+  const arrowCls = p.trend === "up" ? "text-emerald-400" : "text-red-400";
+  return `<div class="row ${picked ? "picked-" + kind : ""}" data-id="${p.id}" data-kind="${kind}">
+    <span class="pos-${esc(p.position)} text-xs font-bold">${esc(p.position)}</span>
+    <span class="truncate">${esc(p.name)}${inj}${moved} <span class="text-xs text-slate-500">${esc(p.slot === "BENCH" ? "" : p.slot)}</span></span>
+    <span class="num text-right text-slate-300">${fmt(p.avg)}</span>
+    <span class="num text-right text-slate-300">${fmt(p.recent_avg)}<span class="${arrowCls} text-xs">${arrow}</span></span>
+    <span class="num text-right font-semibold">${fmt(p.value)}</span>
+  </div>`;
+}
+
+function tagOwners() {
+  state.season.teams.forEach(t => t.roster.forEach(p => { p._owner = t.id; }));
+}
+
+function renderRosters() {
+  tagOwners();
+  $("roster-a").innerHTML = team(state.a).roster.map(p => rowHtml(p, state.give.has(p.id), "give")).join("");
+  $("roster-b").innerHTML = team(state.b).roster.map(p => rowHtml(p, state.get.has(p.id), "get")).join("");
+}
+
+function chip(p, kind) {
+  return `<div class="flex items-center justify-between gap-2 rounded px-2 py-1 bg-slate-900 border border-slate-800">
+    <span><span class="pos-${esc(p.position)} text-xs font-bold">${esc(p.position)}</span> ${esc(p.name)}
+      <span class="text-xs text-slate-500">${fmt(p.value)}/wk</span></span>
+    <button data-remove="${p.id}" data-kind="${kind}" class="text-slate-500 hover:text-slate-200">✕</button></div>`;
+}
+
+function renderSlip() {
+  const give = [...state.give].map(player).filter(Boolean), get = [...state.get].map(player).filter(Boolean);
+  $("slip-give").innerHTML = give.map(p => chip(p, "give")).join("") || '<span class="text-slate-600">nobody yet</span>';
+  $("slip-get").innerHTML = get.map(p => chip(p, "get")).join("") || '<span class="text-slate-600">nobody yet</span>';
+  const ready = give.length && get.length && state.a !== state.b;
+  $("advise").disabled = !ready;
+  $("apply").disabled = !ready || state.stale;
+}
+
+function toggle(kind, id) {
+  const set = kind === "give" ? state.give : state.get;
+  set.has(id) ? set.delete(id) : set.add(id);
+  renderRosters(); renderSlip(); evaluate();
+}
+
+function lineupChanges(side) {
+  const flat = (m) => new Set(Object.values(m).flat());
+  const before = flat(side.lineup_before), after = flat(side.lineup_after);
+  return {
+    enters: [...after].filter(n => !before.has(n)),
+    leaves: [...before].filter(n => !after.has(n)),
+  };
+}
+
+function sideCard(title, s) {
+  const ch = lineupChanges(s);
+  const pos = Object.entries(s.position_delta).map(([k, v]) =>
+    `<span class="pos-${esc(k)}">${esc(k)}</span> <span class="${deltaClass(v)}">${signed(v)}</span>`).join(" · ");
+  const flags = s.flags.map(f => `<li class="text-amber-300">⚠ ${esc(f)}</li>`).join("");
+  return `<div class="pane p-3 text-sm">
+    <div class="text-xs uppercase tracking-widest text-slate-400">${esc(title)}</div>
+    <div class="flex items-baseline gap-3 mt-1">
+      <div class="num text-3xl font-black ${deltaClass(s.weekly_delta)}">${signed(s.weekly_delta)}</div>
+      <div class="text-xs text-slate-400">pts/week · ${fmt(s.before_points)} → ${fmt(s.after_points)}</div>
+    </div>
+    <div class="num text-sm ${deltaClass(s.rest_of_season_delta)}">${signed(s.rest_of_season_delta)} rest of season</div>
+    ${s.vs_real != null ? `<div class="num text-xs mt-1 text-slate-400">vs today's real roster: <span class="${deltaClass(s.vs_real)} font-semibold">${signed(s.vs_real)}</span> pts/week (${fmt(s.real_points)} → ${fmt(s.after_points)})</div>` : ""}
+    ${pos ? `<div class="mt-2 text-xs">${pos}</div>` : ""}
+    ${ch.enters.length ? `<div class="mt-2 text-xs text-emerald-300">Starts: ${ch.enters.map(esc).join(", ")}</div>` : ""}
+    ${ch.leaves.length ? `<div class="text-xs text-red-300">Benched: ${ch.leaves.map(esc).join(", ")}</div>` : ""}
+    ${flags ? `<ul class="mt-2 text-xs space-y-0.5">${flags}</ul>` : ""}
+  </div>`;
+}
+
+function renderResult(r) {
+  state.last = r;
+  $("result").innerHTML = sideCard(r.you.team_name + " (you)", r.you) + sideCard(r.them.team_name, r.them);
+  $("accept").textContent = `${r.acceptance.label} · fit ${fmt(r.acceptance.fit_score, 2)}`;
+}
+
+async function post(path) {
+  return fetch(path, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ team_a: state.a, team_b: state.b, give: [...state.give], get: [...state.get],
+                           ledger: activeLedger() }),
+  });
+}
+
+async function evaluate() {
+  const seq = ++evalSeq;
+  if (!state.give.size || !state.get.size || state.a === state.b) {
+    $("result").innerHTML = ""; $("accept").textContent = "";
+    return;
+  }
+  try {
+    const res = await post("/api/trades/evaluate");
+    const data = await res.json();
+    if (seq !== evalSeq) return;                     // a newer selection superseded this one
+    if (!res.ok) { $("result").innerHTML = `<div class="pane p-3 text-sm text-amber-300 col-span-2">${esc(data.error)}</div>`; return; }
+    renderResult(data);
+  } catch (e) {
+    $("result").innerHTML = `<div class="pane p-3 text-sm text-amber-300 col-span-2">${esc(e.message)}</div>`;
+  }
+}
+
+const VERDICT_STYLE = { accept: "text-emerald-400", decline: "text-red-400", counter: "text-amber-300" };
+
+function renderAdvice(a) {
+  if (!a.available) {
+    $("ai").innerHTML = `<p class="text-amber-300">AI unavailable: ${esc(a.error)}. The numbers above are unaffected.</p>`;
+    return;
+  }
+  const list = (items) => items.map(i => `<li>${esc(i)}</li>`).join("");
+  $("ai").innerHTML = `
+    <div class="flex items-baseline gap-3">
+      <span class="text-2xl font-black uppercase ${VERDICT_STYLE[a.verdict] || ""}">${esc(a.verdict)}</span>
+      <span class="text-xs text-slate-500">${esc(a.confidence)} confidence</span>
+    </div>
+    <p class="text-slate-200">${esc(a.summary)}</p>
+    ${a.reasons.length ? `<div><div class="text-xs uppercase tracking-widest text-slate-500">Why</div><ul class="list-disc ml-5">${list(a.reasons)}</ul></div>` : ""}
+    ${a.risks.length ? `<div><div class="text-xs uppercase tracking-widest text-slate-500">Risks</div><ul class="list-disc ml-5 text-amber-200">${list(a.risks)}</ul></div>` : ""}
+    ${a.counter_offer ? `<div><div class="text-xs uppercase tracking-widest text-slate-500">Counter</div><p>${esc(typeof a.counter_offer === "string" ? a.counter_offer : JSON.stringify(a.counter_offer))}</p></div>` : ""}`;
+}
+
+async function advise() {
+  $("advise").disabled = true;
+  $("ai").innerHTML = '<p class="text-slate-500">Thinking…</p>';
+  try {
+    const res = await post("/api/trades/advise");
+    const data = await res.json();
+    if (!res.ok) { $("ai").innerHTML = `<p class="text-amber-300">${esc(data.error)}</p>`; return; }
+    renderResult(data);
+    renderAdvice(data.advice);
+  } catch (e) {
+    $("ai").innerHTML = `<p class="text-amber-300">${esc(e.message)}</p>`;
+  } finally {
+    renderSlip();
+  }
+}
+
+async function refreshLeague() {
+  saveSim();
+  setBanner("");
+  state.give.clear(); state.get.clear(); state.last = null;
+  $("ai").innerHTML = '<p class="text-slate-500">Build a trade, then press Ask AI. The model only sees the numbers above.</p>';
+  await loadSeason();
+  renderMode();
+}
+
+async function applyTrade() {
+  if (!state.sim || !state.give.size || !state.get.size) return;
+  state.ledger.push({ team_a: state.a, team_b: state.b, give: [...state.give], get: [...state.get] });
+  $("apply").disabled = true;
+  await refreshLeague();                 // rosters now show the post-trade league; ready for the next one
+}
+
+async function undoLast() { state.ledger.pop(); await refreshLeague(); }
+async function resetSim() { state.ledger = []; state.stale = false; await refreshLeague(); }
+
+async function setSim(on) {
+  state.sim = on;
+  if (state.season) renderMode();        // controls respond immediately; rosters follow the refetch
+  await refreshLeague();               // off: real rosters + standard analysis; on: resume the ledger
+}
+
+
+// ---- season outlook (simulation mode) ------------------------------------------------
+let outlookSeq = 0, outlookKey = "";
+const pct = (n) => (n == null ? "—" : Math.round(n * 100) + "%");
+const spct = (n) => (n > 0 ? "+" : "") + Math.round(n * 100) + " pts";
+
+function setOutlookEmpty(msg) {
+  outlookKey = "";
+  $("outlook-meta").textContent = "";
+  $("outlook-body").className = "text-sm text-slate-500";
+  $("outlook-body").textContent = msg;
+  $("outlook-ai").innerHTML = "";
+  $("outlook-ai-btn").disabled = true;
+}
+
+function chart(base, sim) {
+  const b = base.weekly, s = sim.weekly, n = b.length;
+  if (!n) return "";
+  const all = [...b, ...s].map(w => w.cum_wins);
+  const lo = Math.min(...all) - 0.3, hi = Math.max(...all) + 0.3, W = 640, H = 96;
+  const x = (i) => (n === 1 ? W / 2 : 20 + (i * (W - 40)) / (n - 1));
+  const y = (v) => H - 6 - ((v - lo) / (hi - lo)) * (H - 12);
+  const line = (rows, color, dash) => `<polyline fill="none" stroke="${color}" stroke-width="2" ${dash ? 'stroke-dasharray="4 3"' : ""}
+      points="${rows.map((w, i) => x(i) + "," + y(w.cum_wins)).join(" ")}"/>` +
+    rows.map((w, i) => `<circle cx="${x(i)}" cy="${y(w.cum_wins)}" r="3.5" fill="${color}"/>`).join("");
+  const labels = b.map((w, i) => `<text x="${x(i)}" y="${H + 12}" text-anchor="middle" font-size="11" fill="#64748b">W${w.week}</text>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H + 18}" class="w-full" role="img" aria-label="Cumulative expected wins by week">
+    ${line(b, "#94a3b8", true)}${line(s, "#818cf8", false)}${labels}</svg>
+    <div class="flex gap-4 text-xs text-slate-400 -mt-1"><span><span class="text-slate-400">╌╌</span> keep team</span><span><span class="text-indigo-400">━━</span> with trades</span><span class="ml-auto">cumulative expected wins</span></div>`;
+}
+
+function renderOutlook(o) {
+  const b = o.baseline, s = o.simulated, d = o.delta;
+  const row = (label, bv, sv, dv, dFmt, goodHigh = true) => {
+    const good = goodHigh ? dv > 0 : dv < 0, bad = goodHigh ? dv < 0 : dv > 0;
+    const cls = Math.abs(dv) < 0.005 ? "text-slate-400" : good ? "text-emerald-400" : bad ? "text-red-400" : "";
+    return `<tr><td class="py-0.5 text-slate-400">${label}</td><td class="num text-right text-slate-300">${bv}</td>
+      <td class="num text-right font-semibold">${sv}</td><td class="num text-right ${cls}">${dFmt}</td></tr>`;
+  };
+  const rec = (x) => `${fmt(x.expected_wins)}–${fmt(x.expected_losses)}`;
+  const sgn = (v, dp = 1) => (v > 0 ? "+" : "") + fmt(v, dp);
+  const weeks = b.weekly.map((w, i) => {
+    const sw = s.weekly[i];
+    const dd = sw.win_prob - w.win_prob;
+    return `<tr><td class="py-0.5 text-slate-500">W${w.week}</td><td class="truncate max-w-[9rem]">${esc(w.opponent_name)}</td>
+      <td class="num text-right text-slate-300">${pct(w.win_prob)}</td><td class="num text-right font-semibold">${pct(sw.win_prob)}</td>
+      <td class="num text-right ${Math.abs(dd) < 0.005 ? "text-slate-500" : dd > 0 ? "text-emerald-400" : "text-red-400"}">${spct(dd)}</td></tr>`;
+  }).join("");
+  $("outlook-meta").textContent = `${o.team_name} · ${o.record_now} now · ${o.weeks_remaining} games left · top ${o.playoff_teams} make the playoffs`;
+  $("outlook-body").className = "text-sm";
+  $("outlook-body").innerHTML = `
+    <table class="w-full"><thead><tr class="text-xs uppercase tracking-widest text-slate-500">
+      <th class="text-left font-normal"></th><th class="text-right font-normal">Keep team</th><th class="text-right font-normal">With trades</th><th class="text-right font-normal">Change</th></tr></thead><tbody>
+      ${row("Projected record", rec(b), rec(s), d.expected_wins, sgn(d.expected_wins, 2) + " W")}
+      ${row("Wins, 80% range", b.wins_range.join("–"), s.wins_range.join("–"), 0, "")}
+      ${row("Make playoffs", pct(b.playoff_prob), pct(s.playoff_prob), d.playoff_prob, spct(d.playoff_prob))}
+      ${row("Top seed", pct(b.top_seed_prob), pct(s.top_seed_prob), d.top_seed_prob, spct(d.top_seed_prob))}
+      ${row("Expected finish", "#" + fmt(b.expected_rank), "#" + fmt(s.expected_rank), d.expected_rank, sgn(d.expected_rank), false)}
+      ${row("Points / week", fmt(b.points_per_week), fmt(s.points_per_week), d.points_per_week, sgn(d.points_per_week))}
+    </tbody></table>
+    <div class="mt-3">${chart(b, s)}</div>
+    <details class="mt-2"><summary class="cursor-pointer text-xs text-slate-400 hover:text-slate-200">Win chance by week</summary>
+      <table class="w-full mt-1 text-xs"><thead><tr class="text-slate-500"><th class="text-left font-normal">Wk</th><th class="text-left font-normal">Opponent</th>
+        <th class="text-right font-normal">Keep</th><th class="text-right font-normal">Trades</th><th class="text-right font-normal">Δ</th></tr></thead><tbody>${weeks}</tbody></table></details>
+    <p class="mt-2 text-xs text-slate-600">${o.sims.toLocaleString()} seasons simulated. Lineups assumed optimal every week, so read the <em>change</em>, not the absolute points. Regular season only.</p>`;
+  $("outlook-ai-btn").disabled = false;
+}
+
+async function postOutlook(path) {
+  return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                       body: JSON.stringify({ team_id: state.season.my_team_id, ledger: state.ledger }) });
+}
+
+async function loadOutlook() {
+  if (!state.sim) return;
+  if (!state.ledger.length) return setOutlookEmpty("Apply a simulated trade to compare your season with keeping your team as is.");
+  if (state.stale) return setOutlookEmpty("The simulation is out of date, so there is no outlook to show. Reset to real.");
+  const key = JSON.stringify(state.ledger);
+  if (key === outlookKey) return;                   // same ledger: keep the numbers and any AI summary
+  const seq = ++outlookSeq;
+  $("outlook-body").className = "text-sm text-slate-500";
+  $("outlook-body").textContent = "Simulating the rest of the season…";
+  $("outlook-ai").innerHTML = ""; $("outlook-ai-btn").disabled = true;
+  try {
+    const res = await postOutlook("/api/trades/outlook");
+    const data = await res.json();
+    if (seq !== outlookSeq) return;                 // a newer ledger superseded this one
+    if (!res.ok) return setOutlookEmpty(res.status === 404
+      ? "The server is older than the simulation code. Restart uvicorn, then reload." : data.error || "Outlook failed.");
+    outlookKey = key;
+    renderOutlook(data);
+  } catch (e) {
+    if (seq === outlookSeq) setOutlookEmpty("Outlook failed: " + e.message);
+  }
+}
+
+const OUTLOOK_VERDICT = { worth_it: ["Worth doing", "text-emerald-400"], marginal: ["Marginal", "text-amber-300"],
+                          not_worth_it: ["Not worth it", "text-red-400"] };
+
+function renderOutlookAdvice(a) {
+  if (!a.available) {
+    $("outlook-ai").innerHTML = `<p class="text-amber-300">AI unavailable: ${esc(a.error)}. The numbers above are unaffected.</p>`;
+    return;
+  }
+  const [label, cls] = OUTLOOK_VERDICT[a.verdict] || OUTLOOK_VERDICT.marginal;
+  const list = (items) => items.map(i => `<li>${esc(i)}</li>`).join("");
+  $("outlook-ai").innerHTML = `
+    <div class="border-t border-slate-800 pt-3">
+      <div class="flex items-baseline gap-3"><span class="text-lg font-black uppercase ${cls}">${esc(label)}</span>
+        <span class="text-slate-200">${esc(a.headline)}</span></div>
+      <p class="mt-1">${esc(a.summary)}</p>
+      ${a.key_changes.length ? `<div class="mt-1"><div class="text-xs uppercase tracking-widest text-slate-500">What drives it</div><ul class="list-disc ml-5">${list(a.key_changes)}</ul></div>` : ""}
+      ${a.risks.length ? `<div class="mt-1"><div class="text-xs uppercase tracking-widest text-slate-500">Risks</div><ul class="list-disc ml-5 text-amber-200">${list(a.risks)}</ul></div>` : ""}
+    </div>`;
+}
+
+async function summarizeOutlook() {
+  $("outlook-ai-btn").disabled = true;
+  $("outlook-ai").innerHTML = '<p class="text-slate-500 border-t border-slate-800 pt-3">Thinking…</p>';
+  try {
+    const res = await postOutlook("/api/trades/outlook/summary");
+    const data = await res.json();
+    if (!res.ok) { $("outlook-ai").innerHTML = `<p class="text-amber-300">${esc(data.error)}</p>`; return; }
+    renderOutlookAdvice(data.advice);
+  } catch (e) {
+    $("outlook-ai").innerHTML = `<p class="text-amber-300">${esc(e.message)}</p>`;
+  } finally {
+    $("outlook-ai-btn").disabled = false;
+  }
+}
+
+function resetTrade() {
+  state.give.clear(); state.get.clear(); state.last = null;
+  $("ai").innerHTML = '<p class="text-slate-500">Build a trade, then press Ask AI. The model only sees the numbers above.</p>';
+  renderRosters(); renderSlip(); evaluate();
+}
+
+document.addEventListener("click", (e) => {
+  const rm = e.target.closest("[data-remove]");
+  if (rm) return toggle(rm.dataset.kind, Number(rm.dataset.remove));
+  const row = e.target.closest(".row[data-id]");
+  if (row) toggle(row.dataset.kind, Number(row.dataset.id));
+});
+$("team-a").addEventListener("change", (e) => { state.a = Number(e.target.value); resetTrade(); });
+$("team-b").addEventListener("change", (e) => { state.b = Number(e.target.value); resetTrade(); });
+$("advise").addEventListener("click", advise);
+$("apply").addEventListener("click", applyTrade);
+$("outlook-ai-btn").addEventListener("click", summarizeOutlook);
+$("undo").addEventListener("click", undoLast);
+$("reset-sim").addEventListener("click", resetSim);
+$("sim-toggle").addEventListener("change", (e) => setSim(e.target.checked));
+$("clear").addEventListener("click", resetTrade);
+$("refresh").addEventListener("click", () => loadSeason(true));
+
+loadSeason();
+</script>
+</body>
+</html>
