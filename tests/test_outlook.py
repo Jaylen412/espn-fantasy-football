@@ -231,3 +231,38 @@ def test_summary_route_returns_numbers_even_when_ai_is_unavailable(client):
     assert r.status_code == 200
     j = r.json()
     assert j["advice"]["available"] is False and "playoff_prob" in j["simulated"]
+
+
+# ---- bye weeks --------------------------------------------------------------------
+
+
+def test_a_bye_week_lowers_that_weeks_expected_points_and_only_that_week():
+    st = _league()
+    st.players[2].bye_week = 6                          # team 1's RB1 (22) is out in week 6; spare RB 12 (15) covers
+    o = outlook.season_outlook(st, STARTERS, 1, [], sims=200)
+    pts = {w["week"]: w["my_points"] for w in o["baseline"]["weekly"]}
+    assert pts[6] < pts[5] == pts[7] == pts[8]
+    assert pts[5] - pts[6] == pytest.approx(7, abs=0.2)
+    wk6 = next(w for w in o["baseline"]["weekly"] if w["week"] == 6)
+    assert wk6["my_bye_players"] == ["P2"] and next(w for w in o["baseline"]["weekly"] if w["week"] == 5)["my_bye_players"] == []
+
+
+def test_byes_lower_expected_wins_and_points_per_week_against_the_same_team_without_them():
+    plain = outlook.season_outlook(_league(), STARTERS, 1, [], sims=300)["baseline"]
+    st = _league()
+    st.players[2].bye_week = 6
+    st.players[3].bye_week = 7
+    byed = outlook.season_outlook(st, STARTERS, 1, [], sims=300)["baseline"]
+    assert byed["expected_wins"] < plain["expected_wins"]
+    assert byed["points_per_week"] < plain["points_per_week"]
+
+
+def test_a_trade_is_judged_on_its_bye_cover_in_the_projection():
+    st = _league()
+    st.players[2].bye_week = 6                          # RB1 out in week 6, spare RB 12 covers
+    gives_the_cover = {"team_a": 1, "team_b": 2, "give": [12], "get": [4]}     # trade the spare for team 2's weak RB4 (8)
+    o = outlook.season_outlook(st, STARTERS, 1, [gives_the_cover], sims=300)
+    wk = {w["week"]: w["my_points"] for w in o["simulated"]["weekly"]}
+    base = {w["week"]: w["my_points"] for w in o["baseline"]["weekly"]}
+    assert wk[6] < base[6]                              # the cover is gone in the bye week...
+    assert wk[5] == base[5]                             # ...and nothing changes when RB1 plays

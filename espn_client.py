@@ -77,10 +77,10 @@ class ESPNClient:
         await self._client.aclose()
 
     async def _get(self, views: list[str], extra_headers: dict[str, str] | None = None,
-                   tag: str = "response") -> dict[str, Any]:
+                   tag: str = "response", url: str | None = None) -> dict[str, Any]:
         params = [("view", v) for v in views]
         try:
-            resp = await self._client.get(self.url, params=params, headers=extra_headers or {})
+            resp = await self._client.get(url or self.url, params=params, headers=extra_headers or {})
         except httpx.TimeoutException as exc:
             raise ESPNError(f"timeout fetching {views}") from exc
         except httpx.HTTPError as exc:
@@ -142,6 +142,12 @@ class ESPNClient:
         )
 
     # ---- in-season views (trade analysis; all [VERIFY] until dumped) -----------
+
+    async def pro_schedules(self) -> dict[str, Any]:
+        """NFL teams with their bye week: `settings.proTeams[].byeWeek`. Not league-specific,
+        and fixed for the season, so the loader fetches it once."""
+        games = BASE.split("/segments")[0].format(season=self.season)
+        return await self._get(["proTeamSchedules_wl"], tag="pro_schedules", url=games)
 
     async def rosters(self) -> dict[str, Any]:
         """Every team's current roster with lineup slot and injury status."""

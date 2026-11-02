@@ -42,6 +42,7 @@ class SeasonPlayer:
     team_id: int = 0
     weekly: dict[int, float] = field(default_factory=dict)  # played weeks only
     proj_week: float = 0.0                                   # this week's projection
+    bye_week: int = 0                                        # his NFL team's bye; 0 = unknown
 
     @property
     def games(self) -> int:
@@ -92,6 +93,7 @@ class SeasonState:
     schedule: list[tuple[int, int, int]] = field(default_factory=list)        # remaining (week, home, away)
     playoff_teams: int = 0                                                    # 0 = ESPN did not say
     regular_weeks: int = 0
+    byes: dict[str, int] = field(default_factory=dict)                        # NFL team abbrev -> bye week
     loaded_at: float = 0.0
 
     @property
@@ -101,6 +103,11 @@ class SeasonState:
     @property
     def weeks_left(self) -> int:
         return max(self.final_period - self.period + 1, 0)
+
+    @property
+    def weeks_ahead(self) -> list[int]:
+        """Every scoring week still to play, this week included."""
+        return list(range(self.period, self.final_period + 1))
 
     def roster(self, team_id: int) -> list[SeasonPlayer]:
         team = self.teams.get(team_id)
@@ -232,6 +239,23 @@ def apply_matchups(st: SeasonState, data: dict[str, Any]) -> None:
     st.schedule.sort()
 
 
+def parse_byes(data: dict[str, Any]) -> dict[str, int]:
+    """`{abbrev: bye week}` from ESPN's proTeams. Confirmed against a live dump: every NFL team
+    whose bye had passed was missing exactly that week from its players' stat rows."""
+    out: dict[str, int] = {}
+    for team in (data.get("settings") or {}).get("proTeams") or []:
+        abbrev, week = PRO_TEAM_BY_ID.get(team.get("id")), team.get("byeWeek")
+        if abbrev and isinstance(week, int) and week > 0:
+            out[abbrev] = week
+    return out
+
+
+def apply_byes(st: SeasonState, byes: dict[str, int]) -> None:
+    st.byes = dict(byes)
+    for p in st.players.values():
+        p.bye_week = byes.get(p.pro_team, 0)
+
+
 # ---- loading -------------------------------------------------------------------
 
 
@@ -244,6 +268,7 @@ class SeasonLoader:
         self.ttl = ttl
         self.state: SeasonState | None = None
         self.error: str | None = None
+        self._byes: dict[str, int] | None = None       # fixed for the season: fetched once
 
     async def get(self, force: bool = False) -> SeasonState | None:
         fresh = self.state and time.monotonic() - self.state.loaded_at < self.ttl
@@ -259,6 +284,13 @@ class SeasonLoader:
                 apply_matchups(st, await self.client.matchups())
             except Exception as exc:
                 log.warning("matchups unavailable: %s", exc)
+            if self._byes is None:
+                try:
+                    self._byes = parse_byes(await self.client.pro_schedules())
+                except Exception as exc:          # without byes every player is assumed to play every week
+                    log.warning("bye weeks unavailable: %s", exc)
+            if self._byes:
+                apply_byes(st, self._byes)
             st.loaded_at = time.monotonic()
             self.state, self.error = st, None
         except Exception as exc:

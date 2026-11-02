@@ -59,6 +59,7 @@ async def main() -> int:
         rosters = await save("season_rosters.json", client.rosters())
         await save("season_matchups.json", client.matchups())
         await save("season_standings.json", client.standings())
+        await save("pro_schedules.json", client.pro_schedules())
         if rosters:
             period = rosters.get("scoringPeriodId") or 1
             ids = _roster_player_ids(rosters)
@@ -72,6 +73,7 @@ async def main() -> int:
     print("  - teams[].roster.entries[]: playerId, lineupSlotId, playerPoolEntry.player.injuryStatus")
     print("  - schedule[]: matchupPeriodId, home/away teamId + totalPoints")
     print("  - player stats[]: scoringPeriodId, statSourceId (0 actual / 1 projected), appliedTotal")
+    print("  - pro_schedules.json: settings.proTeams[].byeWeek (a bye week has no stat row for that team's players)")
     return rc
 
 

@@ -25,7 +25,7 @@ inferred from an undocumented API and must be confirmed against a live response 
 
 ## Current state
 
-Built, plus the team report and the trade lab (both below). 120 tests pass. **Never run against a live ESPN league** — every `[VERIFY]`
+Built, plus the team report and the trade lab (both below). 188 tests pass. **Never run against a live ESPN league** — every `[VERIFY]`
 item in §5.3/§5.4/§5.5 is still unconfirmed, and the parsers were written from the spec, which §5.3 explicitly warns
 against. `scripts/dump_samples.py` exists to close that gap; run it before trusting anything.
 
@@ -79,7 +79,7 @@ uvicorn app:app --host 127.0.0.1 --port 8000 --reload   # live
 python app.py --replay samples/                         # offline replay, runs to COMPLETE (§11.2)
 
 python scripts/dump_season.py                           # in-season views → samples/live/season_*.json
-pytest                                                  # 120 tests
+pytest                                                  # 188 tests
 pytest tests/test_analysis.py                           # team report — in-memory fixtures, no files needed
 pytest tests/test_draft_math.py::test_snake_reverses_every_other_round
 ```
@@ -98,8 +98,10 @@ recommender.py        Scores available players for the user's next pick
 analysis.py           Grades picks already made, rates the roster, finds trade fits
 season.py             In-season rosters, weekly actuals, standings (SeasonState + SeasonLoader)
 trade.py              evaluate_trade: before/after lineups for both sides of a hypothetical trade
+briefing.py           Decision-first briefing: attention list, position strength, best trades, chained plan
+suggest.py            Better-package search: grades your package, finds alternatives on any team
 outlook.py            Season outlook: your regular season with simulated trades vs. keeping the roster
-advisor.py            OpenAI verdicts on a trade and on a season outlook (REST via httpx, never raises)
+advisor.py            OpenAI verdicts on a trade, a season outlook, and a shortlist of packages (REST via httpx, never raises)
 app.py                FastAPI: serves static/, /api/state, /api/health, /events (SSE), /api/analysis
 static/index.html     Vanilla JS + Tailwind CDN dashboard
 static/analysis.html  Team report page — grades, leverage, trade targets
@@ -194,6 +196,16 @@ Beyond the draft spec: in-season trade evaluation on live ESPN data. Read-only; 
 - **Shapes confirmed against a live dump** (`scripts/dump_season.py`): weekly stats are `statSplitTypeId == 1`;
   `statSourceId` 0 = actual, 1 = projected. A bye week has *no row*; future weeks read an actual of `0.0`;
   the current week has only a projection. Only periods `< current` count as played.
+- **Bye weeks are modelled week by week.** ESPN's `settings.proTeams[].byeWeek` (view `proTeamSchedules_wl`, not
+  league-specific, fetched once and kept) is attached to every player as `bye_week`; `weekly_value(p, week)` is 0 in
+  that week only. Confirmed against a live dump: every NFL team whose bye had passed was missing exactly that week
+  from its players' stat rows (52 of 52). Lineups are solved per remaining week (`lineup_points_by_week`, which only
+  re-solves weeks where a full-strength starter is on bye), so a trade's `weekly_delta` is the mean of the weekly
+  differences, `rest_of_season_delta` their sum, and `by_week` shows each week. A trade that leaves a bye week
+  uncovered (>= `BYE_CLASH` extra points lost) is flagged, as is an incoming player on bye *this* week. The season
+  outlook uses each team's per-week strength, and the briefing flags a starter on bye this week plus the costliest
+  upcoming byes. Bye data is optional: if the call fails everyone is assumed to play every week. Search speed relies on
+  `quick_deltas` (screening) plus a per-search roster `cache`; only the shortlist gets the full `evaluate_trade`.
 - **Judged by the starting lineup.** `evaluate_trade` reuses `analysis.optimal_lineup`, so bench-for-bench
   swaps are worth zero. A player's weekly value blends season avg / last-3 avg / this week's projection
   (`VALUE_WEIGHTS`); OUT and IR players are worth 0.
@@ -211,6 +223,33 @@ Beyond the draft spec: in-season trade evaluation on live ESPN data. Read-only; 
   Playoff spots and regular-season length come from ESPN's `scheduleSettings`; `PLAYOFF_TEAMS` overrides. Lineups
   are assumed optimal every week (no byes/injuries), so trust the *change*, not absolute points.
   It runs in `asyncio.to_thread` so it cannot stall the poller.
+- **Better packages** (`suggest.py`, `POST /api/trades/suggest`). You build a package; Python grades it and
+  searches *every* team (not just the one you picked) for better ones. The give side anchors the search unless
+  `free_give` also lets it add or swap bench pieces. Candidates are 1- and 2-player returns from each team's top
+  healthy players; each must gain >= `MIN_GAIN` pts/week and cost the partner <= `MAX_PARTNER_LOSS`. The best 12 are
+  re-scored on season outlook and ranked by *your playoff-odds change*, then wins, then lineup points. The model
+  only picks from that shortlist: `advisor._clean_package` drops any `candidate_id` it was not offered, so it
+  cannot invent a trade. A trade that needs a roster drop is kept and flagged, not hidden. The shortlist is returned
+  even when OpenAI fails or `ai=false`. It runs on the simulated league when a ledger is sent.
+- **Briefing is the home screen** (`briefing.py`, `/api/briefing/{overview,moves,summary}`). It is computed for
+  the user with no clicks: status, a ranked attention list (injured starters, empty slots, a better lineup,
+  weak/strong positions), the best independent trades across the league, and the best *chained plan* (greedy:
+  apply the best trade, search again on the simulated league, up to 3 steps, never re-trading a player just
+  acquired). Moves and plan steps are re-scored at `REFINE_SIMS` so step gains sum to the plan total. The
+  builder survives as the **Workshop** tab. Results are cached per team on `briefing.fingerprint` (rosters, slots,
+  injuries, averages, week), so a page refresh is free and a roster move or injury recomputes. The overview
+  (~0.1s) and the search (~3s) are separate endpoints so the page paints the fast half first.
+- **The AI briefing is on demand only.** `POST /api/briefing/summary` is the only call that spends OpenAI tokens
+  and only runs when the user presses the button; a repeat press on unchanged data returns the saved text unless
+  `force`. Failures are not cached. The model may only cite ids Python produced (`a*`, `m*`, `plan`).
+- **Direct links.** The address bar always describes the analysis on screen (`history.replaceState`), so any URL
+  is a bookmark: `/trades?view=workshop&sim=1&l=<trades>&a=<team>&b=<team>&give=<ids>&get=<ids>`. Ids are joined
+  with `_` (D/ST player ids are negative); a simulated trade is `teamA.teamB.give.get`, joined with `~`. The briefing
+  is plain `/trades`. An explicit link beats this browser's remembered simulation. Unknown teams, unknown players
+  and malformed fields are dropped, never fatal; a trade that no longer fits the league shows the "out of date"
+  banner. A workshop link does not start the briefing search. Local-only: the link works only where the app runs.
+- **Charts follow the dataviz skill**: the position chart is an emphasis form (accent bar for you, neutral tick
+  for the league average); the accent `#3987e5` was validated against the dark surface.
 - **Page vs server drift.** `static/*.html` is read from disk per request but routes live in the running
   process: after changing `app.py`, restart uvicorn or the new page talks to an old backend (it now says so).
 - **Do not boot the full app to test it** against a real league: the lifespan starts the draft poller and

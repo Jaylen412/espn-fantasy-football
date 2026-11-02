@@ -21,6 +21,16 @@
   .row.picked-give { background:#2a1717; border-color:#7f1d1d; }
   .row.picked-get  { background:#12261b; border-color:#166534; }
   button:disabled { opacity:.45; cursor:not-allowed; }
+  :root { --accent:#3987e5; --neutral-mark:#94a3b8; }       /* validated: dataviz palette slot 1, dark mode */
+  .tab { padding:.35rem .8rem; border-radius:8px; font-size:.875rem; color:#94a3b8; border:1px solid transparent; }
+  .tab:hover { color:#e6edf3; }
+  .tab[aria-selected="true"] { color:#e6edf3; background:#17212d; border-color:#2d3b4d; font-weight:600; }
+  .tab:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .kpi { background:#111820; border:1px solid #1f2a37; border-radius:12px; padding:.75rem 1rem; }
+  .badge { font-size:.65rem; letter-spacing:.08em; font-weight:700; padding:.1rem .4rem; border-radius:4px; border:1px solid; white-space:nowrap; }
+  .b-high { color:#fca5a5; border-color:#7f1d1d; background:#2a1717; }
+  .b-med  { color:#fcd34d; border-color:#78350f; background:#2a2010; }
+  .b-info { color:#94a3b8; border-color:#334155; background:#151d28; }
 </style>
 </head>
 <body class="h-screen">
@@ -30,20 +40,75 @@
 <header class="flex items-center justify-between px-4 py-2 border-b border-slate-800">
   <div class="flex items-baseline gap-3">
     <h1 class="text-lg font-bold tracking-tight">Trade lab</h1>
+    <nav class="flex gap-1" role="tablist" aria-label="Views">
+      <button id="tab-briefing" class="tab" role="tab" aria-selected="true">Briefing</button>
+      <button id="tab-workshop" class="tab" role="tab" aria-selected="false">Workshop</button>
+    </nav>
     <a href="/" class="text-sm text-slate-400 hover:text-slate-200">← draft board</a>
     <a href="/analysis" class="text-sm text-slate-400 hover:text-slate-200">team report</a>
   </div>
   <div class="flex items-center gap-3 text-sm">
-    <label class="flex items-center gap-2 cursor-pointer select-none" title="Chain hypothetical trades on a simulated copy of the league">
+    <label id="sim-wrap" class="hidden flex items-center gap-2 cursor-pointer select-none" title="Chain hypothetical trades on a simulated copy of the league">
       <input id="sim-toggle" type="checkbox" class="accent-indigo-500">
       <span id="sim-label" class="text-slate-300">Simulate trades</span>
     </label>
     <span id="status-text" class="text-slate-500">loading…</span>
+    <button id="copy-link" class="px-2 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800" title="Copy a direct link to exactly what is on screen">Copy link</button>
     <button id="refresh" class="px-2 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800">refresh</button>
   </div>
 </header>
 
-<main class="grid gap-3 p-3" style="grid-template-columns: 24rem 1fr 24rem; height: calc(100vh - 3.25rem);">
+
+<main id="view-briefing" class="scroll" style="height: calc(100vh - 3.25rem);">
+ <div class="mx-auto max-w-6xl p-4 space-y-4">
+
+  <section aria-label="Where you stand">
+    <div id="b-status" class="grid grid-cols-2 md:grid-cols-4 gap-3"><div class="kpi text-slate-500 col-span-full">Reading your league…</div></div>
+  </section>
+
+  <div class="grid lg:grid-cols-5 gap-4">
+    <section class="pane p-4 lg:col-span-3" aria-labelledby="h-attn">
+      <h2 id="h-attn" class="text-xs uppercase tracking-widest text-slate-400 mb-3">Needs your attention</h2>
+      <ul id="b-attention" class="space-y-2 text-sm"><li class="text-slate-500">Checking your roster…</li></ul>
+    </section>
+    <section class="pane p-4 lg:col-span-2" aria-labelledby="h-pos">
+      <h2 id="h-pos" class="text-xs uppercase tracking-widest text-slate-400 mb-1">Strength by position</h2>
+      <div class="flex items-center gap-4 text-xs text-slate-400 mb-3">
+        <span class="flex items-center gap-1"><span class="inline-block w-3 h-2 rounded-[2px]" style="background:var(--accent)"></span> you</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-[2px] h-3" style="background:var(--neutral-mark)"></span> league average</span>
+        <span class="ml-auto">starter pts/week</span>
+      </div>
+      <div id="b-positions" class="space-y-2.5"><p class="text-sm text-slate-500">Comparing every team…</p></div>
+    </section>
+  </div>
+
+  <section class="pane p-4" aria-labelledby="h-moves">
+    <h2 id="h-moves" class="text-xs uppercase tracking-widest text-slate-400 mb-1">Best trades available <span class="text-slate-600 normal-case tracking-normal">searched across every team, ranked by your playoff odds</span></h2>
+    <div id="b-moves" class="grid md:grid-cols-3 gap-3 mt-3"><p class="text-sm text-slate-500 col-span-full">Searching every team for your best trades… (a few seconds)</p></div>
+  </section>
+
+  <section class="pane p-4" aria-labelledby="h-plan">
+    <h2 id="h-plan" class="text-xs uppercase tracking-widest text-slate-400 mb-1">Best plan <span class="text-slate-600 normal-case tracking-normal">the best sequence of trades, each built on the last</span></h2>
+    <div id="b-plan" class="mt-3 text-sm text-slate-500">Working out the best sequence…</div>
+  </section>
+
+  <section class="pane p-4" aria-labelledby="h-ai">
+    <div class="flex items-center justify-between gap-3">
+      <h2 id="h-ai" class="text-xs uppercase tracking-widest text-slate-400">AI briefing</h2>
+      <button id="b-ai-btn" class="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold">Generate AI briefing</button>
+    </div>
+    <div id="b-ai" class="mt-3 text-sm text-slate-500">Everything above is already computed. This adds a written summary and tells you what to do first. It uses one OpenAI call, only when you press the button.</div>
+  </section>
+
+  <footer class="flex items-center gap-3 text-xs text-slate-600 pb-2">
+    <span id="b-footer">—</span>
+    <button id="b-refresh" class="px-2 py-0.5 rounded border border-slate-700 text-slate-400 hover:bg-slate-800">Recompute</button>
+  </footer>
+ </div>
+</main>
+
+<div id="view-workshop" class="hidden">
+<main class="grid gap-3 p-3" style="grid-template-columns: 25rem 1fr 25rem; height: calc(100vh - 3.25rem);">
 
   <!-- LEFT — your roster: click to send -->
   <section class="pane flex flex-col min-h-0">
@@ -79,6 +144,20 @@
     </div>
 
     <div id="result" class="grid grid-cols-2 gap-3 shrink-0"></div>
+
+
+    <div id="improve-pane" class="pane p-3 shrink-0">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <h2 class="text-xs uppercase tracking-widest text-slate-400">Better packages <span class="text-slate-600 normal-case tracking-normal">searches every team</span></h2>
+        <button id="improve-btn" class="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold whitespace-nowrap" disabled>Find a better package</button>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mb-2">
+        <label class="flex items-center gap-1 cursor-pointer" title="Also try adding or swapping bench players on the give side"><input id="free-give" type="checkbox" class="accent-indigo-500"> Let it change what I give</label>
+        <label class="flex items-center gap-1">Search <select id="improve-partner" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-slate-200"></select></label>
+        <label class="flex items-center gap-1 cursor-pointer"><input id="improve-ai" type="checkbox" class="accent-indigo-500" checked> AI recommendations</label>
+      </div>
+      <div id="improve-body" class="text-sm text-slate-500 space-y-2">Add the players you would give, and any you want back, then press <em>Find a better package</em>. The search covers every team, not just the one you picked.</div>
+    </div>
 
     <div id="ledger-pane" class="hidden pane p-3 shrink-0">
       <div class="flex items-center justify-between mb-2">
@@ -122,6 +201,7 @@
     <div id="roster-b" class="scroll flex-1 px-1 pb-2"></div>
   </section>
 </main>
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -142,6 +222,66 @@ const state = { season: null, a: null, b: null, give: new Set(), get: new Set(),
 const simActive = () => state.sim;
 const activeLedger = () => (state.sim ? state.ledger : []);
 const saveSim = () => { store.set("trades.sim", state.sim); store.set("trades.ledger", state.ledger); };
+
+// ---- direct links ---------------------------------------------------------------------
+// The address bar always describes the analysis on screen, so any URL is a bookmark. Format:
+//   /trades?view=workshop&sim=1&l=<trades>&a=<team>&b=<team>&give=<ids>&get=<ids>
+// ids are joined with "_" (player ids can be negative, e.g. D/ST); a ledger trade is
+// teamA.teamB.give.get and trades are joined with "~". The briefing view is plain /trades.
+const Link = {
+  ints(s) {
+    const parts = (s || "").split("_").filter(Boolean).map(Number);
+    return parts.every(Number.isSafeInteger) ? parts : null;
+  },
+  encodeLedger: (l) => l.map(t => [t.team_a, t.team_b, t.give.join("_"), t.get.join("_")].join(".")).join("~"),
+  decodeLedger(s) {
+    const out = [];
+    for (const chunk of (s || "").split("~").filter(Boolean)) {
+      const [a, b, give, get, extra] = chunk.split(".");
+      const step = { team_a: Number(a), team_b: Number(b), give: Link.ints(give), get: Link.ints(get) };
+      if (extra !== undefined || !Number.isSafeInteger(step.team_a) || !Number.isSafeInteger(step.team_b)
+          || !step.give || !step.get || !step.give.length || !step.get.length) return [];   // malformed: ignore the lot
+      out.push(step);
+    }
+    return out;
+  },
+  read() {
+    const q = new URLSearchParams(location.search);
+    if (![...q.keys()].some(k => ["view", "sim", "l", "a", "b", "give", "get"].includes(k))) return null;
+    const team = (k) => (q.has(k) && Number.isSafeInteger(Number(q.get(k))) ? Number(q.get(k)) : null);
+    return { view: q.get("view") === "workshop" ? "workshop" : "briefing", sim: q.get("sim") === "1",
+             ledger: Link.decodeLedger(q.get("l")), a: team("a"), b: team("b"),
+             give: Link.ints(q.get("give")) || [], get: Link.ints(q.get("get")) || [] };
+  },
+};
+const fromLink = Link.read();
+if (fromLink) {                                  // an explicit link beats whatever this browser remembered
+  state.sim = fromLink.sim; state.ledger = fromLink.sim ? fromLink.ledger : state.ledger;
+  state.a = fromLink.a; state.b = fromLink.b;
+  state.pending = { give: fromLink.give, get: fromLink.get };
+}
+let urlLive = false;                             // true once the first load has applied the link, so defaults never overwrite it
+function syncUrl() {
+  if (!urlLive) return;
+  const q = new URLSearchParams();
+  if (!$("view-workshop").classList.contains("hidden")) {
+    q.set("view", "workshop");
+    if (state.sim) { q.set("sim", "1"); if (state.ledger.length) q.set("l", Link.encodeLedger(state.ledger)); }
+    if (state.a != null) { q.set("a", state.a); q.set("b", state.b); }
+    if (state.give.size) q.set("give", [...state.give].join("_"));
+    if (state.get.size) q.set("get", [...state.get].join("_"));
+  }
+  const qs = q.toString();
+  history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
+}
+async function copyLink() {
+  syncUrl();
+  const btn = $("copy-link");
+  try { await navigator.clipboard.writeText(location.href); btn.textContent = "Link copied"; }
+  catch { window.prompt("Copy this link", location.href); }
+  setTimeout(() => { btn.textContent = "Copy link"; }, 1800);
+}
+
 let evalSeq = 0;
 
 function setBanner(msg) {
@@ -163,9 +303,15 @@ async function loadSeason(refresh = false) {
     state.season = data;
     setBanner(data.stale_error ? `Showing last good data — refresh failed: ${data.stale_error}` : "");
     await overlaySimulation();
-    if (state.a == null) {
-      state.a = data.my_team_id in Object.fromEntries(data.teams.map(t => [t.id, 1])) ? data.my_team_id : data.teams[0].id;
-      state.b = (data.teams.find(t => t.id !== state.a) || data.teams[0]).id;
+    const ids = new Set(data.teams.map(t => t.id));       // a link may name a team that does not exist
+    if (!ids.has(state.a)) state.a = ids.has(data.my_team_id) ? data.my_team_id : data.teams[0].id;
+    if (!ids.has(state.b) || state.b === state.a) state.b = (data.teams.find(t => t.id !== state.a) || data.teams[0]).id;
+    if (state.pending) {                                   // players from a link: keep only those actually on each roster
+      const onTeam = (id) => new Set(team(id).roster.map(p => p.id));
+      const mine = onTeam(state.a), theirs = onTeam(state.b);
+      state.give = new Set(state.pending.give.filter(i => mine.has(i)));
+      state.get = new Set(state.pending.get.filter(i => theirs.has(i)));
+      state.pending = null;
     }
     $("status-text").textContent = `week ${data.period} · ${data.final_period - data.period + 1} left`;
     renderTeams();
@@ -174,6 +320,7 @@ async function loadSeason(refresh = false) {
     renderMode();
     evaluate();
     loadOutlook();
+    urlLive = true; syncUrl();
   } catch (e) {
     setBanner("Could not reach the server: " + e.message);
     $("status-text").textContent = "offline";
@@ -218,6 +365,7 @@ function renderMode() {
     ? state.ledger.map(t => `<li>${esc(teamName(t.team_a))} sent ${esc(names(t.give))} to ${esc(teamName(t.team_b))} for ${esc(names(t.get))}</li>`).join("")
     : '<li class="list-none ml-[-1.25rem] text-slate-600">No simulated trades yet. Build a trade and press Apply.</li>';
   $("undo").disabled = $("reset-sim").disabled = !state.ledger.length;
+  syncUrl();
 }
 const teamName = (id) => (team(id) || { name: "team " + id }).name;
 const allPlayer = (id) => state.season.teams.flatMap(t => t.roster).find(p => p.id === id);
@@ -227,6 +375,7 @@ function renderTeams() {
     `<option value="${t.id}" ${t.id === sel ? "selected" : ""}>${esc(t.name)} (${esc(t.record)})</option>`).join("");
   $("team-a").innerHTML = opts(state.a);
   $("team-b").innerHTML = opts(state.b);
+  renderPartners();
 }
 
 function rowHtml(p, picked, kind) {
@@ -235,11 +384,14 @@ function rowHtml(p, picked, kind) {
   const moved = state.sim && state.ledger.length && state.realOwner[p.id] !== undefined
     && state.realOwner[p.id] !== (p._owner ?? state.realOwner[p.id])
     ? ' <span class="text-xs text-indigo-300" title="acquired in a simulated trade">↔</span>' : "";
+  const per = state.season ? state.season.period : 0;
+  const bye = p.bye_week && p.bye_week >= per
+    ? ` <span class="text-xs ${p.bye_week === per ? "text-amber-300 font-semibold" : "text-slate-500"}" title="NFL bye week ${p.bye_week}">${p.bye_week === per ? "BYE" : "bye " + p.bye_week}</span>` : "";
   const arrow = p.trend === "up" ? "▲" : p.trend === "down" ? "▼" : "";
   const arrowCls = p.trend === "up" ? "text-emerald-400" : "text-red-400";
   return `<div class="row ${picked ? "picked-" + kind : ""}" data-id="${p.id}" data-kind="${kind}">
     <span class="pos-${esc(p.position)} text-xs font-bold">${esc(p.position)}</span>
-    <span class="truncate">${esc(p.name)}${inj}${moved} <span class="text-xs text-slate-500">${esc(p.slot === "BENCH" ? "" : p.slot)}</span></span>
+    <span class="truncate" title="${esc(p.name)}${p.bye_week ? " · bye week " + p.bye_week : ""}">${esc(p.name)}${inj}${moved}${bye} <span class="text-xs text-slate-500">${esc(["FLEX", "IR"].includes(p.slot) ? p.slot : "")}</span></span>
     <span class="num text-right text-slate-300">${fmt(p.avg)}</span>
     <span class="num text-right text-slate-300">${fmt(p.recent_avg)}<span class="${arrowCls} text-xs">${arrow}</span></span>
     <span class="num text-right font-semibold">${fmt(p.value)}</span>
@@ -252,8 +404,9 @@ function tagOwners() {
 
 function renderRosters() {
   tagOwners();
-  $("roster-a").innerHTML = team(state.a).roster.map(p => rowHtml(p, state.give.has(p.id), "give")).join("");
-  $("roster-b").innerHTML = team(state.b).roster.map(p => rowHtml(p, state.get.has(p.id), "get")).join("");
+  const best = (roster) => [...roster].sort((x, y) => y.value - x.value || y.avg - x.avg);   // best performers first
+  $("roster-a").innerHTML = best(team(state.a).roster).map(p => rowHtml(p, state.give.has(p.id), "give")).join("");
+  $("roster-b").innerHTML = best(team(state.b).roster).map(p => rowHtml(p, state.get.has(p.id), "get")).join("");
 }
 
 function chip(p, kind) {
@@ -270,6 +423,8 @@ function renderSlip() {
   const ready = give.length && get.length && state.a !== state.b;
   $("advise").disabled = !ready;
   $("apply").disabled = !ready || state.stale;
+  $("improve-btn").disabled = !(give.length || $("free-give").checked) || state.stale;
+  syncUrl();
 }
 
 function toggle(kind, id) {
@@ -378,6 +533,7 @@ async function refreshLeague() {
   setBanner("");
   state.give.clear(); state.get.clear(); state.last = null;
   $("ai").innerHTML = '<p class="text-slate-500">Build a trade, then press Ask AI. The model only sees the numbers above.</p>';
+  clearImprove();                        // a shortlist built on the old league is no longer true
   await loadSeason();
   renderMode();
 }
@@ -442,7 +598,7 @@ function renderOutlook(o) {
   const weeks = b.weekly.map((w, i) => {
     const sw = s.weekly[i];
     const dd = sw.win_prob - w.win_prob;
-    return `<tr><td class="py-0.5 text-slate-500">W${w.week}</td><td class="truncate max-w-[9rem]">${esc(w.opponent_name)}</td>
+    return `<tr><td class="py-0.5 text-slate-500 whitespace-nowrap">W${w.week}${sw.my_bye_players.length ? ` <span class="text-amber-300" title="${esc(sw.my_bye_players.join(", "))} on bye">bye×${sw.my_bye_players.length}</span>` : ""}</td><td class="truncate max-w-[9rem]">${esc(w.opponent_name)}</td>
       <td class="num text-right text-slate-300">${pct(w.win_prob)}</td><td class="num text-right font-semibold">${pct(sw.win_prob)}</td>
       <td class="num text-right ${Math.abs(dd) < 0.005 ? "text-slate-500" : dd > 0 ? "text-emerald-400" : "text-red-400"}">${spct(dd)}</td></tr>`;
   }).join("");
@@ -529,8 +685,306 @@ async function summarizeOutlook() {
   }
 }
 
+// ---- better packages (any team) ------------------------------------------------------
+let improveSeq = 0, improveTeam = null;
+const IMPROVE_DEFAULT = "Add the players you would give, and any you want back, then press <em>Find a better package</em>. The search covers every team, not just the one you picked.";
+
+function clearImprove() {
+  improveSeq++;
+  $("improve-body").className = "text-sm text-slate-500 space-y-2";
+  $("improve-body").innerHTML = IMPROVE_DEFAULT;
+}
+
+function renderPartners() {
+  const keep = $("improve-partner").value;
+  $("improve-partner").innerHTML = '<option value="">whole league</option>' + state.season.teams
+    .filter(t => t.id !== state.a).map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  if ([...$("improve-partner").options].some(o => o.value === keep)) $("improve-partner").value = keep;
+}
+
+const pkgPlayers = (list) => list.map(p =>
+  `<span class="pos-${esc(p.position)} font-bold text-xs">${esc(p.position)}</span> ${esc(p.name)}<span class="text-xs text-slate-500"> ${fmt(p.avg)}${p.trend === "up" ? "▲" : p.trend === "down" ? "▼" : ""}</span>`).join(", ");
+
+function metricLine(c) {
+  const pg = c.playoff_gain, wg = c.wins_gain;
+  return `<span class="${deltaClass(c.you_weekly_delta)}">you ${signed(c.you_weekly_delta)}</span>
+    <span class="text-slate-600">·</span> <span class="${deltaClass(c.them_weekly_delta)}">them ${signed(c.them_weekly_delta)}</span> <span class="text-slate-500">pts/wk</span>
+    <span class="text-slate-600">·</span> <span class="${deltaClass(pg)}">${pg > 0 ? "+" : ""}${Math.round(pg * 100)}% playoffs</span>
+    <span class="text-slate-600">·</span> <span class="${deltaClass(wg)}">${wg > 0 ? "+" : ""}${fmt(wg, 2)} W</span>`;
+}
+
+function flagsHtml(c) {
+  const f = [...(c.flags || []).map(x => "you: " + x), ...(c.partner_flags || []).map(x => "them: " + x)];
+  return f.length ? `<ul class="mt-1 text-xs text-amber-300 space-y-0.5">${f.map(x => `<li>⚠ ${esc(x)}</li>`).join("")}</ul>` : "";
+}
+
+function cardHtml(c, rec, rank) {
+  const apply = state.sim ? `<button data-pkg-apply="${c.id}" class="px-2 py-0.5 rounded bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold">Apply</button>` : "";
+  return `<div class="rounded-lg border ${rec ? "border-indigo-500/60 bg-indigo-950/20" : "border-slate-800 bg-slate-900/40"} p-2">
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0"><div class="text-xs text-slate-400">${rank ? `<span class="text-indigo-300 font-semibold">#${rank}</span> · ` : ""}with <span class="text-slate-200">${esc(c.partner_name)}</span>${c.better_than_yours ? ' <span class="text-emerald-400">· beats your package</span>' : ""}</div>
+        <div class="mt-0.5"><span class="text-red-300">Send</span> ${pkgPlayers(c.give)} <span class="text-slate-500">→</span> <span class="text-emerald-300">Get</span> ${pkgPlayers(c.get)}</div></div>
+      <div class="flex gap-1 shrink-0"><button data-pkg-load="${c.id}" class="px-2 py-0.5 rounded border border-slate-600 hover:bg-slate-800 text-xs">Load</button>${apply}</div>
+    </div>
+    <div class="num text-xs mt-1">${metricLine(c)}</div>
+    ${rec ? `<p class="mt-1 text-slate-200">${esc(rec.reason)}</p>
+      ${rec.risk ? `<p class="text-xs text-amber-200">Risk: ${esc(rec.risk)}</p>` : ""}
+      ${rec.pitch ? `<div class="mt-1 text-xs text-slate-300 bg-slate-900 border border-slate-800 rounded p-1.5 flex items-start gap-2"><span class="flex-1 italic">“${esc(rec.pitch)}”</span><button data-pkg-copy="${c.id}" class="text-slate-400 hover:text-slate-100 shrink-0">copy</button></div>` : ""}` : ""}
+    ${flagsHtml(c)}</div>`;
+}
+
+const GRADE = { strong: ["Strong", "text-emerald-400"], fair: ["Fair", "text-amber-300"], weak: ["Weak", "text-red-400"] };
+let improveResult = null;
+
+function renderImprove(res) {
+  improveResult = res;
+  const ad = res.advice, recs = ad && ad.available ? ad.recommendations : [];
+  const recIds = new Set(recs.map(r => r.candidate_id));
+  const byId = Object.fromEntries(res.candidates.map(c => [c.id, c]));
+  let html = "";
+  if (res.yours) {
+    const y = res.yours;
+    const [g, gc] = ad && ad.available ? (GRADE[ad.your_package.verdict] || GRADE.fair) : [null, ""];
+    html += `<div class="rounded-lg border border-slate-700 p-2"><div class="text-xs uppercase tracking-widest text-slate-500">Your package · ${esc(y.partner_name)}</div>
+      <div class="mt-0.5"><span class="text-red-300">Send</span> ${pkgPlayers(y.give)} <span class="text-slate-500">→</span> <span class="text-emerald-300">Get</span> ${pkgPlayers(y.get)}</div>
+      <div class="num text-xs mt-1">${metricLine(y)}</div>
+      ${g ? `<p class="mt-1"><span class="font-black uppercase ${gc}">${g}</span> <span class="text-slate-300">${esc(ad.your_package.assessment)}</span></p>` : ""}${flagsHtml(y)}</div>`;
+  }
+  if (ad && !ad.available) html += `<p class="text-xs text-amber-300">AI unavailable: ${esc(ad.error)}. Showing the ranked search results.</p>`;
+  if (ad && ad.available && !recs.length && res.candidates.length) html += `<p class="text-xs text-slate-400">The AI did not recommend any of these over the others; ranked results below.</p>`;
+  recs.forEach((r, i) => { const c = byId[r.candidate_id]; if (c) html += cardHtml(c, r, i + 1); });
+  const rest = res.candidates.filter(c => !recIds.has(c.id));
+  if (!res.candidates.length) {
+    html += `<p class="text-slate-400">Nothing in the league beats a plain swap on current stats${res.partner_filter != null ? " with that team" : ""}: no package helps your lineup without hurting the other side. Try letting it change what you give, or search the whole league.</p>`;
+  } else if (rest.length) {
+    html += `<details ${recs.length ? "" : "open"}><summary class="cursor-pointer text-xs text-slate-400 hover:text-slate-200">${recs.length ? "Other options" : "Ranked options"} (${rest.length})</summary>
+      <div class="mt-1 space-y-1.5">${rest.map(c => cardHtml(c, null, 0)).join("")}</div></details>`;
+  }
+  html += `<p class="text-xs text-slate-600">Searched ${res.searched.toLocaleString()} packages across ${res.partner_filter != null ? "one team" : "the league"}; ${res.qualified} helped you without gutting the other side.${res.outlook ? " Ranked by change in your playoff odds." : " Ranked by lineup gain (no games left to project)."}${state.sim && state.ledger.length ? " Built on your simulated trades." : ""}</p>`;
+  $("improve-body").className = "text-sm space-y-2";
+  $("improve-body").innerHTML = html;
+}
+
+async function findBetter() {
+  const seq = ++improveSeq;
+  improveTeam = state.a;
+  $("improve-btn").disabled = true;
+  $("improve-body").className = "text-sm text-slate-500";
+  $("improve-body").textContent = "Searching every team…";
+  try {
+    const res = await fetch("/api/trades/suggest", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ team_id: state.a, give: [...state.give], get: [...state.get], ledger: activeLedger(),
+        free_give: $("free-give").checked, partner_id: $("improve-partner").value ? Number($("improve-partner").value) : null,
+        ai: $("improve-ai").checked }) });
+    const data = await res.json();
+    if (seq !== improveSeq) return;
+    if (!res.ok) {
+      $("improve-body").innerHTML = `<p class="text-amber-300">${res.status === 404 ? "The server is older than this feature. Restart uvicorn, then reload." : esc(data.error || "Search failed.")}</p>`;
+      return;
+    }
+    renderImprove(data);
+  } catch (e) {
+    if (seq === improveSeq) $("improve-body").innerHTML = `<p class="text-amber-300">${esc(e.message)}</p>`;
+  } finally {
+    if (seq === improveSeq) renderSlip();
+  }
+}
+
+function loadPackage(id) {
+  const c = improveResult && improveResult.candidates.find(x => x.id === id);
+  return c ? loadPackageObj(c) : false;
+}
+
+function loadPackageObj(c) {
+  state.a = c.step.team_a; state.b = c.step.team_b;
+  state.give = new Set(c.step.give); state.get = new Set(c.step.get);
+  renderTeams(); renderRosters(); renderSlip(); evaluate();
+  $("slip-give").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  return true;
+}
+
+// ---- views & briefing ---------------------------------------------------------------
+function setView(name) {
+  const b = name === "briefing";
+  $("view-briefing").classList.toggle("hidden", !b);
+  $("view-workshop").classList.toggle("hidden", b);
+  $("sim-wrap").classList.toggle("hidden", b);
+  $("tab-briefing").setAttribute("aria-selected", b);
+  $("tab-workshop").setAttribute("aria-selected", !b);
+  if (b) ensureBriefing();
+  syncUrl();
+}
+
+let briefingStarted = false;             // the slow search runs once, and only if the briefing is actually shown
+function ensureBriefing() {
+  if (briefingStarted) return;
+  briefingStarted = true;
+  loadBriefing();
+}
+
+const B = { over: null, moves: null };
+
+async function getJson(path) {
+  const r = await fetch(path);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(r.status === 404 ? "The server is older than this page. Restart uvicorn, then reload." : d.error || ("HTTP " + r.status));
+  return d;
+}
+const errHtml = (e) => `<p class="text-amber-300 col-span-full">${esc(e.message)}</p>`;
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+function kpi(label, value, sub, hero) {
+  return `<div class="kpi"><div class="text-xs uppercase tracking-widest text-slate-400">${esc(label)}</div>
+    <div class="num font-black leading-tight ${hero ? "text-5xl" : "text-3xl"}">${value}</div>
+    <div class="text-xs text-slate-400 mt-0.5">${sub}</div></div>`;
+}
+
+function renderStatus(s) {
+  const ord = (n) => `#${n} of ${s.teams}`;
+  const tiles = [kpi("Record", esc(s.record_now), `${ord(s.standing_now)} right now`)];
+  if (s.projection) {
+    tiles.unshift(kpi("Playoff odds", pct(s.playoff_prob), `top ${s.playoff_teams} of ${s.teams} make it`, true));
+    tiles.push(kpi("Projected finish", `${fmt(s.expected_wins)}–${fmt(s.expected_losses)}`, `80% range: ${s.wins_range[0]}–${s.wins_range[1]} wins`));
+    tiles.push(kpi("Points / week", fmt(s.points_per_week), `expected finish #${fmt(s.expected_rank)}`));
+  } else {
+    tiles.push(kpi("Season", "Complete", "no regular-season games left to project"));
+  }
+  $("b-status").innerHTML = tiles.join("");
+}
+
+const SEV = { high: ["URGENT", "b-high"], med: ["HEADS UP", "b-med"], info: ["FYI", "b-info"] };
+function renderAttention(items) {
+  $("b-attention").innerHTML = items.length ? items.map(a => {
+    const [label, cls] = SEV[a.severity] || SEV.info;
+    return `<li id="ref-${esc(a.id)}" class="flex items-start gap-3"><span class="badge ${cls} mt-0.5">${label}</span><span class="text-slate-200">${esc(a.text)}</span></li>`;
+  }).join("") : '<li class="text-slate-300">✓ Nothing needs your attention right now: no injured starters, no empty slots, and your lineup is already your best.</li>';
+}
+
+function renderPositions(rows) {
+  const max = Math.max(1, ...rows.flatMap(r => [r.mine, r.league_avg]));
+  $("b-positions").innerHTML = rows.map(r => {
+    const arrow = r.diff_pct > 0.005 ? "▲" : r.diff_pct < -0.005 ? "▼" : "•";
+    const tip = `${r.position}: you ${r.mine} pts/week, league average ${r.league_avg}, rank ${r.rank} of ${r.teams}`;
+    return `<div class="grid items-center gap-2" style="grid-template-columns:2.2rem 1fr 7.5rem" title="${esc(tip)}">
+      <span class="pos-${esc(r.position)} font-bold text-sm">${esc(r.position)}</span>
+      <div class="relative h-3 rounded-[4px]" style="background:#1f2a37" role="img" aria-label="${esc(tip)}">
+        <div class="h-3 rounded-[4px]" style="width:${(r.mine / max) * 100}%;background:var(--accent)"></div>
+        <div class="absolute" style="left:calc(${(r.league_avg / max) * 100}% - 1px);top:-3px;width:2px;height:18px;background:var(--neutral-mark)"></div></div>
+      <span class="num text-xs text-right text-slate-300">${fmt(r.mine)} <span class="text-slate-500">vs ${fmt(r.league_avg)}</span> <span class="text-slate-400">${arrow} #${r.rank}</span></span></div>`;
+  }).join("");
+}
+
+function moveCard(c, label) {
+  return `<article id="ref-${esc(c.id)}" class="rounded-lg border border-slate-800 bg-slate-900/40 p-3 flex flex-col gap-2">
+    <div class="text-xs text-slate-400"><span class="text-indigo-300 font-semibold">${esc(label)}</span> · with <span class="text-slate-200">${esc(c.partner_name)}</span></div>
+    <div><span class="text-red-300">Send</span> ${pkgPlayers(c.give)}<br><span class="text-emerald-300">Get</span> ${pkgPlayers(c.get)}</div>
+    <div class="num text-xs">${metricLine(c)}</div>
+    ${flagsHtml(c)}
+    <div class="flex gap-2 mt-auto pt-1">
+      <button data-b-review="${esc(c.id)}" class="px-2 py-1 rounded border border-slate-600 hover:bg-slate-800 text-xs">Review</button>
+      <button data-b-sim="${esc(c.id)}" class="px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold">Simulate it</button>
+    </div></article>`;
+}
+
+function renderMoves(mv) {
+  $("b-moves").className = "grid md:grid-cols-3 gap-3 mt-3";
+  $("b-moves").innerHTML = mv.moves.length
+    ? mv.moves.map((m, i) => moveCard(m, "#" + (i + 1))).join("")
+    : '<p class="text-sm text-slate-300 col-span-full">No trade in the league helps your lineup without hurting the other side more than they would accept. Your roster is in good shape as it stands.</p>';
+  const p = mv.plan, box = $("b-plan");
+  if (!p) { box.className = "mt-3 text-sm text-slate-300"; box.textContent = "No sequence of trades adds enough to your playoff odds to be worth doing."; return; }
+  box.className = "mt-3 text-sm";
+  const o = p.outlook, d = o && o.delta;
+  const total = o ? `<div class="grid grid-cols-3 gap-3 mb-3">
+      ${kpi("Playoff odds", `${pct(o.baseline.playoff_prob)} → ${pct(o.simulated.playoff_prob)}`, `<span class="${deltaClass(d.playoff_prob)}">${spct(d.playoff_prob)}</span> if you do all ${p.steps.length}`)}
+      ${kpi("Expected wins", `${fmt(o.baseline.expected_wins)} → ${fmt(o.simulated.expected_wins)}`, `<span class="${deltaClass(d.expected_wins)}">${signed(d.expected_wins)}</span> over the rest of the season`)}
+      ${kpi("Points / week", `${fmt(o.baseline.points_per_week)} → ${fmt(o.simulated.points_per_week)}`, `<span class="${deltaClass(d.points_per_week)}">${signed(d.points_per_week)}</span>`)}</div>` : "";
+  box.innerHTML = `<div id="ref-plan">${total}
+    <ol class="space-y-2">${p.steps.map((s, i) => `<li class="flex gap-3"><span class="num text-slate-500 w-4">${i + 1}.</span><div>
+      <div><span class="text-red-300">Send</span> ${pkgPlayers(s.give)} <span class="text-slate-500">→</span> <span class="text-emerald-300">Get</span> ${pkgPlayers(s.get)} <span class="text-slate-500">· ${esc(s.partner_name)}</span></div>
+      <div class="num text-xs">${metricLine(s)}</div>${flagsHtml(s)}</div></li>`).join("")}</ol>
+    <button data-b-plan class="mt-3 px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-sm font-semibold">Simulate this plan</button>
+    <p class="mt-2 text-xs text-slate-600">Each step is measured on top of the ones before it, so the steps add up to the total.</p></div>`;
+}
+
+function renderFooter() {
+  const parts = [];
+  for (const d of [B.over, B.moves]) if (d) parts.push(d);
+  const when = parts.length ? clock(parts.map(d => d.computed_at).sort().pop()) : "—";
+  const cached = parts.length && parts.every(d => d.cached);
+  $("b-footer").textContent = `Computed ${when}${cached ? " · saved until your roster, injuries or the week changes" : ""}. Lineups are assumed optimal every week, so trust the changes more than the absolute points.`;
+}
+
+async function loadBriefing(refresh = false) {
+  const q = refresh ? "?refresh=true" : "";
+  $("b-moves").className = "grid md:grid-cols-3 gap-3 mt-3";
+  $("b-moves").innerHTML = '<p class="text-sm text-slate-500 col-span-full">Searching every team for your best trades… (a few seconds)</p>';
+  $("b-plan").className = "mt-3 text-sm text-slate-500"; $("b-plan").textContent = "Working out the best sequence…";
+  const over = getJson("/api/briefing/overview" + q).then(d => { B.over = d; renderStatus(d.status); renderAttention(d.attention); renderPositions(d.positions); })
+    .catch(e => { $("b-status").innerHTML = `<div class="kpi col-span-full">${errHtml(e)}</div>`; });
+  const moves = getJson("/api/briefing/moves" + q).then(d => { B.moves = d; renderMoves(d); })
+    .catch(e => { $("b-moves").innerHTML = errHtml(e); $("b-plan").textContent = ""; });
+  await Promise.all([over, moves]);
+  renderFooter();
+}
+
+const REF_LABEL = (ref) => ref === "plan" ? "the plan" : ref.startsWith("m") ? "trade " + ref.slice(1) : "the attention list";
+function renderBriefAdvice(a) {
+  if (!a.available) { $("b-ai").innerHTML = `<p class="text-amber-300">AI unavailable: ${esc(a.error)}. Everything above is unaffected.</p>`; return; }
+  $("b-ai").className = "mt-3 text-sm text-slate-300 space-y-3";
+  $("b-ai").innerHTML = `<div><div class="text-lg font-semibold text-slate-100">${esc(a.headline)}</div><p class="mt-1">${esc(a.summary)}</p></div>
+    ${a.actions.length ? `<ol class="space-y-2">${a.actions.map((x, i) => `<li class="flex gap-3"><span class="num text-indigo-300 font-bold w-4">${i + 1}.</span>
+      <div><div class="text-slate-100 font-medium">${esc(x.do)}</div><div class="text-slate-400">${esc(x.why)}</div>
+      <a href="#ref-${esc(x.ref)}" data-b-jump="${esc(x.ref)}" class="text-xs text-indigo-300 hover:underline">see ${esc(REF_LABEL(x.ref))}</a></div></li>`).join("")}</ol>` : ""}
+    ${a.watch_out.length ? `<div><div class="text-xs uppercase tracking-widest text-slate-500">Watch out for</div><ul class="list-disc ml-5 text-amber-200">${a.watch_out.map(w => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}`;
+}
+
+async function generateBriefing(force = false) {
+  $("b-ai-btn").disabled = true;
+  $("b-ai").className = "mt-3 text-sm text-slate-500"; $("b-ai").textContent = "Writing your briefing…";
+  try {
+    const res = await fetch("/api/briefing/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { $("b-ai").innerHTML = `<p class="text-amber-300">${res.status === 404 ? "The server is older than this page. Restart uvicorn, then reload." : esc(d.error || "Failed.")}</p>`; return; }
+    renderBriefAdvice(d.advice);
+    $("b-ai-btn").textContent = "Regenerate";
+  } catch (e) { $("b-ai").innerHTML = `<p class="text-amber-300">${esc(e.message)}</p>`; }
+  finally { $("b-ai-btn").disabled = false; }
+}
+
+async function simulateLedger(ledger) {
+  if (state.sim && state.ledger.length && !confirm("This replaces your current simulated trades. Continue?")) return;
+  await seasonReady;
+  state.ledger = ledger; state.sim = true; state.stale = false;
+  setView("workshop");
+  await refreshLeague();
+}
+
+async function reviewMove(c) {
+  await seasonReady;
+  setView("workshop");
+  if (state.sim) await setSim(false);       // moves were found on the real league, so review them there
+  loadPackageObj(c);
+}
+
+$("view-briefing").addEventListener("click", async (e) => {
+  const rev = e.target.closest("[data-b-review]"), sim = e.target.closest("[data-b-sim]"),
+        plan = e.target.closest("[data-b-plan]"), jump = e.target.closest("[data-b-jump]");
+  const move = (id) => B.moves && B.moves.moves.find(m => m.id === id);
+  if (rev && move(rev.dataset.bReview)) await reviewMove(move(rev.dataset.bReview));
+  if (sim && move(sim.dataset.bSim)) await simulateLedger([move(sim.dataset.bSim).step]);
+  if (plan && B.moves && B.moves.plan) await simulateLedger(B.moves.plan.ledger);
+  if (jump) { e.preventDefault(); const t = document.getElementById("ref-" + jump.dataset.bJump); if (t) t.scrollIntoView({ block: "center", behavior: "smooth" }); }
+});
+$("b-ai-btn").addEventListener("click", () => generateBriefing($("b-ai-btn").textContent === "Regenerate"));
+$("b-refresh").addEventListener("click", () => loadBriefing(true));
+$("copy-link").addEventListener("click", copyLink);
+$("tab-briefing").addEventListener("click", () => setView("briefing"));
+$("tab-workshop").addEventListener("click", () => setView("workshop"));
+
 function resetTrade() {
   state.give.clear(); state.get.clear(); state.last = null;
+  clearImprove();
   $("ai").innerHTML = '<p class="text-slate-500">Build a trade, then press Ask AI. The model only sees the numbers above.</p>';
   renderRosters(); renderSlip(); evaluate();
 }
@@ -545,6 +999,17 @@ $("team-a").addEventListener("change", (e) => { state.a = Number(e.target.value)
 $("team-b").addEventListener("change", (e) => { state.b = Number(e.target.value); resetTrade(); });
 $("advise").addEventListener("click", advise);
 $("apply").addEventListener("click", applyTrade);
+$("improve-btn").addEventListener("click", findBetter);
+$("free-give").addEventListener("change", renderSlip);
+$("improve-body").addEventListener("click", async (e) => {
+  const load = e.target.closest("[data-pkg-load]"), app = e.target.closest("[data-pkg-apply]"), cp = e.target.closest("[data-pkg-copy]");
+  if (load) loadPackage(load.dataset.pkgLoad);
+  if (app && loadPackage(app.dataset.pkgApply)) await applyTrade();
+  if (cp) {
+    const rec = improveResult && improveResult.advice && improveResult.advice.recommendations.find(r => r.candidate_id === cp.dataset.pkgCopy);
+    try { await navigator.clipboard.writeText(rec.pitch); cp.textContent = "copied"; } catch { cp.textContent = "select + copy manually"; }
+  }
+});
 $("outlook-ai-btn").addEventListener("click", summarizeOutlook);
 $("undo").addEventListener("click", undoLast);
 $("reset-sim").addEventListener("click", resetSim);
@@ -552,7 +1017,8 @@ $("sim-toggle").addEventListener("change", (e) => setSim(e.target.checked));
 $("clear").addEventListener("click", resetTrade);
 $("refresh").addEventListener("click", () => loadSeason(true));
 
-loadSeason();
+const seasonReady = loadSeason();
+setView(fromLink && fromLink.view === "workshop" ? "workshop" : "briefing");
 </script>
 </body>
 </html>

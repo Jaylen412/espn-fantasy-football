@@ -18,7 +18,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from advisor import advise, summarize_outlook
+from advisor import advise, recommend_package, summarize_briefing, summarize_outlook
+import briefing
 from analysis import analyze
 from config import Config, load_config
 from espn_client import ESPNClient
@@ -26,7 +27,9 @@ from outlook import OutlookError, season_outlook
 from poller import Broadcaster, Poller, make_source
 from season import SeasonLoader
 from state import DraftState
-from trade import TradeError, evaluate_simulated, evaluate_trade, player_row, replay
+from suggest import improve_package
+from trade import (TradeError, describe_step, evaluate_simulated, evaluate_trade, player_row,
+                   replay)
 
 STATIC = Path(__file__).parent / "static"
 HEARTBEAT_SECONDS = 10
@@ -141,6 +144,21 @@ class TradeRequest(BaseModel):
 
 class LedgerRequest(BaseModel):
     ledger: list[LedgerStep] = []
+
+
+class SuggestRequest(BaseModel):
+    team_id: int | None = None     # defaults to MY_TEAM_ID
+    give: list[int] = []           # the package being improved; the give side anchors the search
+    get: list[int] = []
+    ledger: list[LedgerStep] = []
+    free_give: bool = False        # also let the search add or swap bench pieces on the give side
+    partner_id: int | None = None  # restrict the search to one team; default is the whole league
+    ai: bool = True
+
+
+class BriefingRequest(BaseModel):
+    team_id: int | None = None     # defaults to MY_TEAM_ID
+    force: bool = False            # regenerate the AI text even if one is cached for this data
 
 
 class OutlookRequest(BaseModel):
@@ -274,6 +292,112 @@ async def api_trade_outlook_summary(req: OutlookRequest) -> JSONResponse:
         return err
     out["advice"] = await summarize_outlook(out, app_cfg.openai_api_key, app_cfg.openai_model)
     return JSONResponse(out)
+
+
+@app.post("/api/trades/suggest")
+async def api_trade_suggest(req: SuggestRequest) -> JSONResponse:
+    """Grade the package you built and search every team for better ones. The shortlist
+    is computed first and returned even if the OpenAI step fails or is switched off."""
+    st, err = await _season()
+    if st is None:
+        return JSONResponse({"error": err}, status_code=503)
+    team_id = req.team_id if req.team_id is not None else app_cfg.my_team_id
+    ledger = [s.model_dump() for s in req.ledger]
+    try:
+        result = await asyncio.to_thread(
+            improve_package, st, app_cfg.starters, team_id, req.give, req.get, ledger,
+            sum(app_cfg.roster_slots.values()), app_cfg.playoff_teams, req.free_give, req.partner_id)
+    except TradeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    except Exception as exc:
+        log.exception("package search failed")
+        return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+    result["prior_trades"] = [describe_step(st, s) for s in ledger]
+    if req.ai:
+        result["advice"] = await recommend_package(result, app_cfg.openai_api_key, app_cfg.openai_model)
+    return JSONResponse(result)
+
+
+# ---- briefing: computed for you on load, cached until the underlying data changes ----
+
+_briefing_cache: dict[int, dict] = {}
+_briefing_locks = {name: asyncio.Lock() for name in ("overview", "moves", "advice")}
+
+
+async def _briefing_section(name: str, team_id: int, refresh: bool, compute):
+    """(payload, None) or (None, error response). Cached per team on the data fingerprint, so
+    a page refresh is free but a roster move, injury or new week recomputes. One lock per
+    section: the slow search never blocks the fast overview."""
+    st, err = await _season()
+    if st is None:
+        return None, JSONResponse({"error": err}, status_code=503)
+    if team_id not in st.teams:
+        return None, JSONResponse({"error": f"unknown team {team_id}"}, status_code=422)
+    key = briefing.fingerprint(st, team_id, app_cfg.playoff_teams)
+    async with _briefing_locks[name]:
+        entry = _briefing_cache.get(team_id)
+        if not entry or entry["key"] != key:
+            entry = _briefing_cache[team_id] = {"key": key}
+        cached = name in entry and not refresh
+        if not cached:
+            try:
+                entry[name] = await asyncio.to_thread(compute, st)
+            except Exception as exc:
+                log.exception("briefing %s failed", name)
+                return None, JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+            entry[name + "_at"] = datetime.now(timezone.utc).isoformat()
+        return {**entry[name], "cached": cached, "computed_at": entry[name + "_at"],
+                "fingerprint": key}, None
+
+
+def _briefing_team(team_id: int | None) -> int:
+    return team_id if team_id is not None else app_cfg.my_team_id
+
+
+@app.get("/api/briefing/overview")
+async def api_briefing_overview(team_id: int | None = None, refresh: bool = False) -> JSONResponse:
+    tid = _briefing_team(team_id)
+    out, err = await _briefing_section(
+        "overview", tid, refresh,
+        lambda st: briefing.overview(st, app_cfg.starters, tid, app_cfg.playoff_teams))
+    return err or JSONResponse(out)
+
+
+@app.get("/api/briefing/moves")
+async def api_briefing_moves(team_id: int | None = None, refresh: bool = False) -> JSONResponse:
+    tid = _briefing_team(team_id)
+    out, err = await _briefing_section(
+        "moves", tid, refresh,
+        lambda st: briefing.moves_and_plan(st, app_cfg.starters, tid,
+                                           sum(app_cfg.roster_slots.values()), app_cfg.playoff_teams))
+    return err or JSONResponse(out)
+
+
+@app.post("/api/briefing/summary")
+async def api_briefing_summary(req: BriefingRequest) -> JSONResponse:
+    """The written AI briefing. Runs only when the user presses the button, and a repeat press
+    on unchanged data returns the saved text unless `force` is set."""
+    tid = _briefing_team(req.team_id)
+    over, err = await _briefing_section(
+        "overview", tid, False, lambda st: briefing.overview(st, app_cfg.starters, tid, app_cfg.playoff_teams))
+    if err:
+        return err
+    mv, err = await _briefing_section(
+        "moves", tid, False,
+        lambda st: briefing.moves_and_plan(st, app_cfg.starters, tid, sum(app_cfg.roster_slots.values()),
+                                           app_cfg.playoff_teams))
+    if err:
+        return err
+    async with _briefing_locks["advice"]:
+        entry = _briefing_cache[tid]
+        if entry.get("advice") and not req.force:
+            return JSONResponse({"advice": entry["advice"], "cached": True, "computed_at": entry["advice_at"]})
+        payload, refs = briefing.ai_payload(over, mv)
+        advice = await summarize_briefing(payload, refs, app_cfg.openai_api_key, app_cfg.openai_model)
+        if advice["available"]:                      # never cache a failure: the next press should retry
+            entry["advice"], entry["advice_at"] = advice, datetime.now(timezone.utc).isoformat()
+        return JSONResponse({"advice": advice, "cached": False,
+                             "computed_at": datetime.now(timezone.utc).isoformat()})
 
 
 @app.get("/api/health")

@@ -304,3 +304,140 @@ def test_stale_ledger_names_the_step_that_no_longer_fits():
         trade.replay(st, stale)
     with pytest.raises(trade.TradeError, match="out of date at trade 1"):
         trade.replay(st, [{"team_a": 1}])        # malformed step, same clean error
+
+
+# ---- bye weeks ------------------------------------------------------------------
+
+import asyncio  # noqa: E402
+
+RB_ONLY = {"RB": 1}
+
+
+def _bye_p(pid, pts, team, bye=0, slot="BENCH"):
+    p = _p(pid, "RB", pts, team, slot=slot)
+    p.bye_week = bye
+    return p
+
+
+def _bye_league(period=8):
+    """Team 1: RB1 (20, bye 9) with a bench RB2 (10, bye 12). Team 2: RB3 (15, bye 9), RB4 (8, bye 12)."""
+    return _league([_bye_p(1, 20, 1, 9, "RB"), _bye_p(2, 10, 1, 12)],
+                   [_bye_p(3, 15, 2, 9, "RB"), _bye_p(4, 8, 2, 12)], period=period)
+
+
+def test_a_player_scores_zero_in_his_bye_week_and_only_then():
+    p = _bye_p(1, 20, 1, bye=10)
+    assert trade.weekly_value(p, 10) == 0
+    assert trade.weekly_value(p, 9) > 0 and trade.weekly_value(p) > 0       # other weeks and "no week" are unaffected
+    assert trade.weekly_value(_bye_p(2, 20, 1, bye=0), 10) > 0              # unknown bye (0) never blanks a week
+
+
+def test_a_starters_bye_costs_that_week_and_a_bench_player_covers_it():
+    st = _bye_league()
+    by_week, base = trade.lineup_points_by_week(st.roster(1), RB_ONLY, st.weeks_ahead)
+    assert by_week[8] == by_week[10] == base["points"] == pytest.approx(20, abs=0.1)
+    assert by_week[9] == pytest.approx(10, abs=0.1)                          # RB1 on bye: bench RB2 starts
+    assert by_week[12] == pytest.approx(20, abs=0.1)                         # the bench player's bye costs nothing
+
+
+def test_an_incoming_player_who_covers_a_bye_is_credited_in_that_week_only():
+    st = _bye_league()
+    st.players[3].bye_week = 11                       # RB3's bye is a different week from the starter's (9)
+    r = trade.evaluate_trade(st, RB_ONLY, 1, 2, [2], [3])      # bench RB2 (10, bye 12) for RB3 (15, bye 11)
+    wk = {w["week"]: w for w in r["you"]["by_week"]}
+    assert wk[9]["before"] == pytest.approx(10, abs=0.1) and wk[9]["after"] == pytest.approx(15, abs=0.1)
+    assert wk[10]["before"] == wk[10]["after"] == pytest.approx(20, abs=0.1)         # RB1 plays; nothing changes
+    assert r["you"]["rest_of_season_delta"] == pytest.approx(5, abs=0.2)             # +5 in week 9, 0 elsewhere
+    assert r["you"]["weekly_delta"] == pytest.approx(5 / len(st.weeks_ahead), abs=0.1)
+    assert not any("bye:" in f for f in r["you"]["flags"])                           # covering a bye is not a problem
+
+
+def test_stacking_the_same_bye_leaves_that_week_uncovered_and_says_so():
+    st = _bye_league()                                  # RB1 (starter) and RB3 both have their bye in week 9
+    r = trade.evaluate_trade(st, RB_ONLY, 1, 2, [2], [3])      # trade away the bench RB (bye 12) that was covering week 9
+    wk9 = next(w for w in r["you"]["by_week"] if w["week"] == 9)
+    assert wk9["before"] == pytest.approx(10, abs=0.1) and wk9["after"] == pytest.approx(0, abs=0.1)
+    assert r["you"]["rest_of_season_delta"] == pytest.approx(-10, abs=0.2)
+    flag = next(f for f in r["you"]["flags"] if "Week 9 bye" in f)
+    assert "10.0 more points" in flag
+
+
+def test_an_incoming_player_on_bye_this_week_cannot_help_yet():
+    st = _bye_league(period=9)
+    r = trade.evaluate_trade(st, RB_ONLY, 1, 2, [2], [3])               # RB3's bye is week 9 = this week
+    assert any("on his bye this week" in f and "week 10" in f for f in r["you"]["flags"])
+    assert not any("on his bye this week" in f for f in trade.evaluate_trade(_bye_league(period=8), RB_ONLY, 1, 2, [2], [3])["you"]["flags"])
+
+
+def test_quick_deltas_agree_with_the_full_evaluation_and_the_cache_is_transparent():
+    st = _bye_league()
+    full = trade.evaluate_trade(st, RB_ONLY, 1, 2, [2], [3])
+    cache = {}
+    me, them = trade.quick_deltas(st, RB_ONLY, 1, 2, [2], [3], cache)
+    assert me == pytest.approx(full["you"]["weekly_delta"], abs=0.06)
+    assert them == pytest.approx(full["them"]["weekly_delta"], abs=0.06)
+    assert cache and trade.quick_deltas(st, RB_ONLY, 1, 2, [2], [3], cache) == (me, them)
+    cached = trade.evaluate_trade(st, RB_ONLY, 1, 2, [2], [3], cache=cache)
+    assert cached["you"]["by_week"] == full["you"]["by_week"]
+
+
+def test_player_rows_expose_the_bye_week():
+    assert trade.player_row(_bye_p(1, 20, 1, 9))["bye_week"] == 9
+    assert trade.player_row(_bye_p(2, 20, 1, 0))["bye_week"] is None
+
+
+# ---- loading bye weeks ------------------------------------------------------------------
+
+
+def test_parse_byes_maps_nfl_team_ids_to_weeks_and_ignores_junk():
+    data = {"settings": {"proTeams": [{"id": 11, "byeWeek": 13}, {"id": 12, "byeWeek": 5},
+                                      {"id": 0, "byeWeek": 0}, {"id": 999, "byeWeek": 4},
+                                      {"id": 1, "byeWeek": "x"}, {"id": 2}]}}
+    assert season.parse_byes(data) == {"IND": 13, "KC": 5}
+    assert season.parse_byes({}) == {}
+
+
+def test_apply_byes_sets_every_players_bye_by_nfl_team():
+    st = season.parse_rosters(_roster_payload())                      # Test Back is on IND (proTeamId 11)
+    season.apply_byes(st, {"IND": 13})
+    assert st.players[42].bye_week == 13 and st.byes == {"IND": 13}
+    season.apply_byes(st, {})
+    assert st.players[42].bye_week == 0
+
+
+def test_weeks_ahead_runs_from_this_week_through_the_final_period():
+    st = season.parse_rosters(_roster_payload())
+    assert st.weeks_ahead == list(range(8, 18)) and len(st.weeks_ahead) == st.weeks_left
+
+
+class _FakeClient:
+    def __init__(self, bye_error=False):
+        self.bye_calls, self.bye_error = 0, bye_error
+
+    async def rosters(self):
+        return _roster_payload()
+
+    async def player_weeks(self, ids, period):
+        return {"players": []}
+
+    async def matchups(self):
+        return {"schedule": []}
+
+    async def pro_schedules(self):
+        self.bye_calls += 1
+        if self.bye_error:
+            raise RuntimeError("espn down")
+        return {"settings": {"proTeams": [{"id": 11, "byeWeek": 13}]}}
+
+
+def test_loader_fetches_byes_once_and_keeps_working_if_they_fail():
+    client = _FakeClient()
+    loader = season.SeasonLoader(client, ttl=0)
+    first = asyncio.run(loader.get(force=True))
+    second = asyncio.run(loader.get(force=True))
+    assert first.players[42].bye_week == 13 and second.players[42].bye_week == 13
+    assert client.bye_calls == 1                                      # fixed for the season, so not refetched each refresh
+
+    broken = season.SeasonLoader(_FakeClient(bye_error=True), ttl=0)
+    st = asyncio.run(broken.get(force=True))
+    assert st is not None and st.players[42].bye_week == 0            # everyone is assumed to play: degrade, don't crash
